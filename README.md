@@ -2,15 +2,18 @@
 
 每天自动追踪 20 位 AI/科技人物（X + 微博）动态，并在每天早上 10:00 发送日报邮件。
 
-## 本次升级（对齐你给的 Apify 统一 API）
+## 你这个 Apify 页面里，我会用哪几个 API？
 
-- 支持直接使用 `APIFY_ACTS_API_URL`（例如你给的 `/v2/acts?token=...`）自动发现可用 actor。
-- 仍支持手动指定 `APIFY_X_ACTOR_ID` 与 `APIFY_WEIBO_ACTOR_ID`，优先使用手动值。
-- 抓取链路改为 **Apify REST API 直连**（无需 `apify-client` 依赖）：
-  1. 触发 actor run
-  2. 读取 run 的 dataset
-  3. 交给 OpenAI 生成日报
-  4. 通过 SMTP 邮件发送
+基于你截图中的能力（尤其是 `GET /v2/acts?token=***`），本项目实际使用这 3 个 endpoint：
+
+1. `GET /v2/acts?token=...`
+   - 用途：列出你账号里可用的 actors（用于自动发现 X/微博 actor）
+2. `POST /v2/acts/{actorId}/runs?token=...&waitForFinish=180`
+   - 用途：触发一次抓取任务
+3. `GET /v2/datasets/{datasetId}/items?token=...`
+   - 用途：读取抓取结果
+
+> 不需要 `POST /v2/acts`（创建 actor），因为我们只是“调用现有 actor”，不是新建 actor。
 
 ## 已实现能力
 
@@ -24,10 +27,13 @@
 ```bash
 npm install
 cp .env.example .env
+npm run list:actors
 npm start
 ```
 
-### 必填环境变量
+## 环境变量
+
+必填：
 
 - `APIFY_TOKEN`
 - `OPENAI_API_KEY`
@@ -35,25 +41,36 @@ npm start
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASS`
 - `EMAIL_FROM` / `EMAIL_TO`
 
-### Apify 配置（二选一）
+可选（强烈建议生产设置）：
 
-1. **推荐（你当前场景）**：
-   - 配置 `APIFY_ACTS_API_URL=https://api.apify.com/v2/acts?token=...`
-   - 程序会自动从 acts 列表中尝试匹配 X/微博 actor。
+- `APIFY_X_ACTOR_ID`
+- `APIFY_WEIBO_ACTOR_ID`
 
-2. **生产更稳定**：
-   - 直接配置 `APIFY_X_ACTOR_ID` 和 `APIFY_WEIBO_ACTOR_ID`，跳过自动发现。
+说明：
+
+- 若不配置 actor ID，程序会根据 actor 名称关键词自动匹配。
+- 若配置了 actor ID，会优先使用手动值（更稳定，不怕自动匹配误判）。
+
+## 如何确认 actor ID
+
+运行：
+
+```bash
+npm run list:actors
+```
+
+从输出里找到你的 X scraper / Weibo scraper 的 `id`，填到 `.env`。
 
 ## GitHub Actions 定时任务
 
 - 文件：`.github/workflows/daily-report.yml`
 - cron：`0 2 * * *`（UTC），对应北京时间 10:00
 
-## 你下一步只要给我这两个 JSON
+## 下一步我可以继续帮你
 
-为了把“占位 input”改成你线上可跑版本，你把这两段发我：
+你把这两段发我，我可以直接改成生产可跑：
 
 - 你的 X actor input 示例 JSON
 - 你的微博 actor input 示例 JSON
 
-我会直接把 `src/main.js` 里的 `buildPlatformInput` 改成你的真实 schema，并补上清洗/去重逻辑。
+我会把 `src/main.js` 里的 `buildPlatformInput` 精确替换成你的 schema，并加去重/清洗逻辑。

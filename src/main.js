@@ -7,6 +7,9 @@ import { buildDailyPrompt } from './prompt.js';
 
 dotenv.config();
 
+const X_ACTOR_KEYWORDS = ['twitter', 'x.com', 'x ', 'tweet'];
+const WEIBO_ACTOR_KEYWORDS = ['weibo', '微博'];
+
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) {
@@ -18,11 +21,9 @@ function requiredEnv(name) {
 function buildApifyUrl(path, query = {}) {
   const base = process.env.APIFY_BASE_URL || 'https://api.apify.com';
   const url = new URL(path, base);
-  const token = process.env.APIFY_TOKEN || process.env.APIFY_API_TOKEN;
+  const token = requiredEnv('APIFY_TOKEN');
 
-  if (token) {
-    url.searchParams.set('token', token);
-  }
+  url.searchParams.set('token', token);
 
   Object.entries(query)
     .filter(([, value]) => value !== undefined && value !== null)
@@ -50,15 +51,21 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
+async function listUsedActors(limit = 1000) {
+  const actsUrl = buildApifyUrl('/v2/acts', { limit });
+  const actsResponse = await fetchJson(actsUrl);
+  return actsResponse?.data?.items || [];
+}
+
+function actorSearchText(act) {
+  return [act.name, act.title, act.username, act.description].filter(Boolean).join(' ').toLowerCase();
+}
+
 function pickActorFromActs(acts = [], keywords = []) {
   const normalizedKeywords = keywords.map((item) => item.toLowerCase());
 
   return acts.find((act) => {
-    const fields = [act.name, act.title, act.username, act.description]
-      .filter(Boolean)
-      .map((item) => item.toLowerCase())
-      .join(' ');
-
+    const fields = actorSearchText(act);
     return normalizedKeywords.some((keyword) => fields.includes(keyword));
   });
 }
@@ -69,21 +76,11 @@ async function resolveActorId(platform) {
     return directId;
   }
 
-  const actsUrl = process.env.APIFY_ACTS_API_URL
-    ? new URL(process.env.APIFY_ACTS_API_URL)
-    : buildApifyUrl('/v2/acts');
-
-  if (!actsUrl.searchParams.get('token')) {
-    actsUrl.searchParams.set('token', requiredEnv('APIFY_TOKEN'));
-  }
-
-  const actsResponse = await fetchJson(actsUrl);
-  const acts = actsResponse?.data?.items || [];
-
+  const acts = await listUsedActors();
   const actor =
     platform === 'X'
-      ? pickActorFromActs(acts, ['twitter', 'x.com', 'x scraper'])
-      : pickActorFromActs(acts, ['weibo']);
+      ? pickActorFromActs(acts, X_ACTOR_KEYWORDS)
+      : pickActorFromActs(acts, WEIBO_ACTOR_KEYWORDS);
 
   if (!actor?.id) {
     throw new Error(
@@ -115,12 +112,7 @@ async function runActorAndFetchItems({ actorId, input }) {
     limit: 200
   });
 
-  return fetchJson(datasetUrl, {
-    method: 'GET',
-    headers: {
-      'content-type': 'application/json'
-    }
-  });
+  return fetchJson(datasetUrl, { method: 'GET' });
 }
 
 function buildPlatformInput({ platform, fromDate }) {
@@ -143,7 +135,6 @@ function buildPlatformInput({ platform, fromDate }) {
 }
 
 async function collectDailySignals() {
-  requiredEnv('APIFY_TOKEN');
   const dayStart = dayjs().subtract(1, 'day').startOf('day').toISOString();
 
   const xActorId = await resolveActorId('X');
@@ -205,6 +196,18 @@ async function sendEmail({ subject, markdownBody }) {
 }
 
 async function main() {
+  if (process.argv.includes('--list-actors')) {
+    const acts = await listUsedActors(200);
+    const rows = acts.map((act) => ({
+      id: act.id,
+      name: act.name,
+      title: act.title,
+      username: act.username
+    }));
+    console.table(rows);
+    return;
+  }
+
   const { xItems, weiboItems, xActorId, weiboActorId } = await collectDailySignals();
   const briefing = await generateBriefing({ xItems, weiboItems });
 
