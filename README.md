@@ -5,28 +5,39 @@
 ## 最简逻辑链路（Vercel）
 
 1. Vercel Cron 定时触发 `/api/daily-report`
-2. 接口调用 Apify 抓取 X + 微博数据
-3. OpenAI 生成中文日报
-4. SMTP 发送到你的邮箱
+2. 接口**立即返回 202**（快速返回）
+3. 后台异步执行：Apify 抓取 -> OpenAI 总结 -> SMTP 发信
+4. 到 Vercel Logs 查看成功/失败
 
 已内置关键文件：
 
-- `api/daily-report.js`：Vercel Serverless 入口
+- `api/daily-report.js`：Vercel Serverless 入口（默认异步）
 - `src/runDailyBriefing.js`：抓取 + 总结 + 发信主流程
 - `vercel.json`：每天 10:00（北京时间）定时
+
+## 如何手动测试
+
+### 推荐（与线上一致）
+
+打开：
+
+- `https://你的域名/api/daily-report`
+
+你会立刻看到 `202` + `mode: async`，表示任务已进入后台。
+
+### 调试模式（同步等待）
+
+打开：
+
+- `https://你的域名/api/daily-report?sync=true`
+
+这个模式会等待任务执行完成，再返回结果（可能较慢）。
 
 ## 你现在该做什么
 
 请直接打开这份超详细教程：
 
 - `docs/STEP_BY_STEP_CN.md`
-
-它包含：
-
-- GitHub 页面怎么点
-- Vercel 页面怎么点
-- 环境变量怎么填
-- 如何手动验证和看日志
 
 ## 本地调试（可选）
 
