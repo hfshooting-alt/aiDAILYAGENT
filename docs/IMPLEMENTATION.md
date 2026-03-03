@@ -1,31 +1,32 @@
-# 落地实施路线图
+# 落地实施路线图（已接入 Apify 统一 API）
 
-## 第 1 阶段：把“能跑通”作为目标（1~2 小时）
+## 第 1 阶段：5 分钟内跑通
 
-1. 在 Apify 上确认两个 actor：
-   - X 抓取 actor
-   - 微博抓取 actor
-2. 把 actor 入参 schema 发给我。
-3. 我会按 schema 改 `src/main.js` 入参并做字段映射。
-4. 本地 `npm start` 跑通，确认能发邮件。
+1. 把你给的 URL 放入 `.env`：
+   - `APIFY_ACTS_API_URL=https://api.apify.com/v2/acts?token=...`
+2. 设置其余密钥（OpenAI + SMTP）。
+3. 运行 `npm start`。
 
-## 第 2 阶段：稳定上线（半天）
+> 若自动匹配 actor 不准确，直接配置：
+> - `APIFY_X_ACTOR_ID`
+> - `APIFY_WEIBO_ACTOR_ID`
 
-1. 在 GitHub Actions 配置 secrets。
-2. 手动触发 workflow 验证。
-3. 打开定时任务，每天北京时间 10:00 自动发送。
+## 第 2 阶段：对齐真实 actor schema（关键）
 
-## 第 3 阶段：质量优化（按需）
+当前 `buildPlatformInput` 仍是通用字段名。你把两个 actor 的 input schema 给我后，我会：
 
-1. 内容去重：同一事件跨平台合并。
-2. 人物画像：长期记录每个人观点变化。
-3. 热点评分：自动识别高影响力事件。
-4. 多渠道分发：邮件 + 飞书/企业微信。
+1. 精确改字段映射
+2. 增加参数校验
+3. 增加数据清洗（去重、无效项过滤）
 
-## 我如何继续帮你
+## 第 3 阶段：稳定上线
 
-你把以下信息给我，我可以直接继续改到可上线状态：
+1. 配置 GitHub Actions Secrets
+2. 手动触发 `workflow_dispatch` 验证
+3. 打开定时任务（每天 10:00 北京时间）
 
-- 两个 Apify actor 的真实输入参数示例（JSON）
-- 你的邮箱服务商（QQ/企业邮箱/Resend/SendGrid）
-- 希望日报标题风格（偏简报/偏分析）
+## 第 4 阶段：质量增强（可选）
+
+1. 人物长期观点追踪（周环比）
+2. 热点事件聚类（跨平台合并）
+3. 飞书/企业微信同步推送

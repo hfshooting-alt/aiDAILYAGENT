@@ -1,6 +1,5 @@
 import dotenv from 'dotenv';
 import dayjs from 'dayjs';
-import { ApifyClient } from 'apify-client';
 import OpenAI from 'openai';
 import nodemailer from 'nodemailer';
 import { X_TARGETS, WEIBO_TARGETS } from './targets.js';
@@ -16,39 +15,152 @@ function requiredEnv(name) {
   return value;
 }
 
-async function collectFromApify({ actorId, input }) {
-  const client = new ApifyClient({ token: requiredEnv('APIFY_TOKEN') });
-  const run = await client.actor(actorId).call(input);
-  const dataset = client.dataset(run.defaultDatasetId);
-  const { items } = await dataset.listItems({ limit: 200, desc: true });
-  return items;
+function buildApifyUrl(path, query = {}) {
+  const base = process.env.APIFY_BASE_URL || 'https://api.apify.com';
+  const url = new URL(path, base);
+  const token = process.env.APIFY_TOKEN || process.env.APIFY_API_TOKEN;
+
+  if (token) {
+    url.searchParams.set('token', token);
+  }
+
+  Object.entries(query)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .forEach(([key, value]) => {
+      url.searchParams.set(key, String(value));
+    });
+
+  return url;
 }
 
-async function collectDailySignals() {
-  const dayStart = dayjs().subtract(1, 'day').startOf('day').toISOString();
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      'content-type': 'application/json',
+      ...(options.headers || {})
+    }
+  });
 
-  const xItems = await collectFromApify({
-    actorId: requiredEnv('APIFY_X_ACTOR_ID'),
-    input: {
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Apify API error ${response.status}: ${body}`);
+  }
+
+  return response.json();
+}
+
+function pickActorFromActs(acts = [], keywords = []) {
+  const normalizedKeywords = keywords.map((item) => item.toLowerCase());
+
+  return acts.find((act) => {
+    const fields = [act.name, act.title, act.username, act.description]
+      .filter(Boolean)
+      .map((item) => item.toLowerCase())
+      .join(' ');
+
+    return normalizedKeywords.some((keyword) => fields.includes(keyword));
+  });
+}
+
+async function resolveActorId(platform) {
+  const directId = process.env[`APIFY_${platform}_ACTOR_ID`];
+  if (directId) {
+    return directId;
+  }
+
+  const actsUrl = process.env.APIFY_ACTS_API_URL
+    ? new URL(process.env.APIFY_ACTS_API_URL)
+    : buildApifyUrl('/v2/acts');
+
+  if (!actsUrl.searchParams.get('token')) {
+    actsUrl.searchParams.set('token', requiredEnv('APIFY_TOKEN'));
+  }
+
+  const actsResponse = await fetchJson(actsUrl);
+  const acts = actsResponse?.data?.items || [];
+
+  const actor =
+    platform === 'X'
+      ? pickActorFromActs(acts, ['twitter', 'x.com', 'x scraper'])
+      : pickActorFromActs(acts, ['weibo']);
+
+  if (!actor?.id) {
+    throw new Error(
+      `Cannot resolve APIFY_${platform}_ACTOR_ID automatically. Please set APIFY_${platform}_ACTOR_ID explicitly.`
+    );
+  }
+
+  return actor.id;
+}
+
+async function runActorAndFetchItems({ actorId, input }) {
+  const runUrl = buildApifyUrl(`/v2/acts/${encodeURIComponent(actorId)}/runs`, {
+    waitForFinish: 180
+  });
+
+  const runResponse = await fetchJson(runUrl, {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+
+  const datasetId = runResponse?.data?.defaultDatasetId;
+  if (!datasetId) {
+    throw new Error(`Actor ${actorId} run succeeded but no dataset ID returned.`);
+  }
+
+  const datasetUrl = buildApifyUrl(`/v2/datasets/${datasetId}/items`, {
+    clean: true,
+    desc: true,
+    limit: 200
+  });
+
+  return fetchJson(datasetUrl, {
+    method: 'GET',
+    headers: {
+      'content-type': 'application/json'
+    }
+  });
+}
+
+function buildPlatformInput({ platform, fromDate }) {
+  if (platform === 'X') {
+    return {
       handles: X_TARGETS,
       includeReplies: true,
       includeRetweets: true,
       includeLikes: true,
-      fromDate: dayStart
-    }
-  });
+      fromDate
+    };
+  }
 
-  const weiboItems = await collectFromApify({
-    actorId: requiredEnv('APIFY_WEIBO_ACTOR_ID'),
-    input: {
-      keywordsOrUsers: WEIBO_TARGETS,
-      includeComments: true,
-      includeReposts: true,
-      fromDate: dayStart
-    }
-  });
+  return {
+    keywordsOrUsers: WEIBO_TARGETS,
+    includeComments: true,
+    includeReposts: true,
+    fromDate
+  };
+}
 
-  return { xItems, weiboItems };
+async function collectDailySignals() {
+  requiredEnv('APIFY_TOKEN');
+  const dayStart = dayjs().subtract(1, 'day').startOf('day').toISOString();
+
+  const xActorId = await resolveActorId('X');
+  const weiboActorId = await resolveActorId('WEIBO');
+
+  const [xItems, weiboItems] = await Promise.all([
+    runActorAndFetchItems({
+      actorId: xActorId,
+      input: buildPlatformInput({ platform: 'X', fromDate: dayStart })
+    }),
+    runActorAndFetchItems({
+      actorId: weiboActorId,
+      input: buildPlatformInput({ platform: 'WEIBO', fromDate: dayStart })
+    })
+  ]);
+
+  return { xItems, weiboItems, xActorId, weiboActorId };
 }
 
 async function generateBriefing({ xItems, weiboItems }) {
@@ -93,7 +205,7 @@ async function sendEmail({ subject, markdownBody }) {
 }
 
 async function main() {
-  const { xItems, weiboItems } = await collectDailySignals();
+  const { xItems, weiboItems, xActorId, weiboActorId } = await collectDailySignals();
   const briefing = await generateBriefing({ xItems, weiboItems });
 
   await sendEmail({
@@ -101,7 +213,7 @@ async function main() {
     markdownBody: briefing
   });
 
-  console.log('Daily briefing sent successfully.');
+  console.log('Daily briefing sent successfully.', { xActorId, weiboActorId });
 }
 
 main().catch((error) => {
