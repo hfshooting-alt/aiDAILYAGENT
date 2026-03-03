@@ -1,113 +1,178 @@
-# 从 0 到 1：每天 10:00 自动收到 AI 人物日报（小白版）
+# 电脑小白专用：你要点哪里、在哪里输入命令（超详细）
 
-下面只做“你能直接照抄执行”的步骤。
-
-## 你要准备的账号
-
-1. GitHub（已有仓库）
-2. Apify（你已有 API token）
-3. OpenAI API key
-4. 一个可发信的 SMTP 邮箱（QQ 企业邮 / Gmail / Resend SMTP 等）
+这份说明默认你几乎不会命令行。你只要照着做就行。
 
 ---
 
-## 第 1 步：本地先跑通一次
+## 0. 先说清楚：你要在“哪里”操作？
 
-在项目目录执行：
+你会用到 2 个地方：
+
+1. **代码编辑器**（用来打开和修改文件）
+   - 推荐：VS Code（免费下载）
+2. **终端**（用来输入命令）
+   - 可以是 VS Code 里的终端（最简单）
+
+> 简单理解：
+> - “打开文件” = 在 VS Code 里双击文件名
+> - “执行命令” = 在 VS Code 下方黑色终端里输入
+
+---
+
+## 1. 安装软件（一次性）
+
+如果你还没有，请先安装：
+
+1. **Node.js 20+**（去 nodejs.org 下载 LTS 版）
+2. **Git**（去 git-scm.com 下载）
+3. **VS Code**（去 code.visualstudio.com 下载）
+
+安装完后，重启电脑一次（避免环境变量没生效）。
+
+---
+
+## 2. 把项目下载到电脑
+
+### 2.1 打开 VS Code
+
+- 双击 VS Code 图标
+
+### 2.2 打开终端
+
+- 顶部菜单点：`Terminal` -> `New Terminal`
+- 你会看到底部出现一个终端窗口
+
+### 2.3 在终端输入（复制粘贴）
+
+> 把下面 `你的仓库地址` 换成你 GitHub 仓库的 HTTPS 地址
+
+```bash
+git clone 你的仓库地址
+cd aiDAILYAGENT
+```
+
+做完后，你已经进入项目目录了（很关键）。
+
+---
+
+## 3. 安装依赖 + 创建配置文件
+
+在刚才那个终端继续输入：
 
 ```bash
 npm install
 cp .env.example .env
 ```
 
-然后打开 `.env`，先填这些：
+如果你是 Windows 且 `cp` 不可用，改用：
 
-- `APIFY_TOKEN=你的 apify token`
-- `OPENAI_API_KEY=你的 openai key`
-- `OPENAI_MODEL=gpt-4.1-mini`（先用默认）
-- `SMTP_HOST=你的 SMTP 域名`
-- `SMTP_PORT=465`
-- `SMTP_SECURE=true`
-- `SMTP_USER=你的邮箱账号`
-- `SMTP_PASS=你的 SMTP 授权码`
-- `EMAIL_FROM=发件邮箱`
-- `EMAIL_TO=收件邮箱`
+```bash
+copy .env.example .env
+```
 
 ---
 
-## 第 2 步：找出 X 和微博的 actor ID
+## 4. 打开 `.env` 文件（你问的“去哪里打开文件”）
 
-执行：
+1. VS Code 左侧文件列表里，找到 `.env`（如果没看到，点刷新）
+2. 双击 `.env` 打开
+3. 把下面内容按你自己的账号填进去：
+
+- `APIFY_TOKEN=你的 apify token`
+- `OPENAI_API_KEY=你的 openai key`
+- `OPENAI_MODEL=gpt-4.1-mini`
+- `SMTP_HOST=你的 SMTP 服务器地址`
+- `SMTP_PORT=465`
+- `SMTP_SECURE=true`
+- `SMTP_USER=你的邮箱账号`
+- `SMTP_PASS=你的邮箱 SMTP 授权码`
+- `EMAIL_FROM=发件邮箱`
+- `EMAIL_TO=收件邮箱`
+
+4. 按 `Ctrl + S`（Mac 是 `Cmd + S`）保存
+
+---
+
+## 5. 找 X 和微博的 actor ID（在“哪里执行”？就在同一个终端）
+
+在 VS Code 底部终端输入：
 
 ```bash
 npm run list:actors
 ```
 
-你会看到一张 actor 列表。找到：
+你会看到很多 actor。
 
-- 一个抓 X（Twitter/X）的 actor
-- 一个抓微博的 actor
+找到：
+- 一个 X/Twitter 的 actor
+- 一个微博的 actor
 
-把它们的 id 填到 `.env`：
+记下它们的 `id`，然后回到 `.env` 文件增加两行：
 
-- `APIFY_X_ACTOR_ID=xxx`
-- `APIFY_WEIBO_ACTOR_ID=yyy`
+- `APIFY_X_ACTOR_ID=这里填X的id`
+- `APIFY_WEIBO_ACTOR_ID=这里填微博的id`
 
-> 不确定哪个是对的？先随便选看起来最像的，跑一次不对再换。我们后续可以再精确对齐。
+再保存（`Ctrl+S` / `Cmd+S`）。
 
 ---
 
-## 第 3 步：执行一次日报任务
+## 6. 运行一次日报任务
 
-执行：
+在同一个终端输入：
 
 ```bash
 npm start
 ```
 
-成功标准：
+### 成功标志
 
-1. 终端看到 `Daily briefing sent successfully`
-2. 你的 `EMAIL_TO` 收到日报邮件
+- 终端出现：`Daily briefing sent successfully`
+- 你的邮箱收到日报
 
-如果失败：
+### 常见报错对照
 
-- 报 SMTP 错误：先检查 `SMTP_HOST/PORT/SECURE/USER/PASS`
-- 报 actor 错误：检查 `APIFY_X_ACTOR_ID` / `APIFY_WEIBO_ACTOR_ID`
-- 报 OpenAI 错误：检查 `OPENAI_API_KEY`
-
----
-
-## 第 4 步：放到 GitHub，每天自动跑
-
-把代码推到 GitHub 后：
-
-1. 进入仓库 `Settings -> Secrets and variables -> Actions`
-2. 把 `.env` 里的每个变量都加成 `Repository secrets`
-3. 进入 `Actions` 页面，找到 `Daily AI Briefing`
-4. 点 `Run workflow` 手动执行一次
-5. 看日志成功后，就会每天自动执行
-
-当前定时是：
-
-- `0 2 * * *`（UTC）= 北京时间每天 `10:00`
+- SMTP 报错：检查 `SMTP_HOST/PORT/SECURE/USER/PASS`
+- OpenAI 报错：检查 `OPENAI_API_KEY`
+- actor 报错：检查 `APIFY_X_ACTOR_ID/APIFY_WEIBO_ACTOR_ID`
 
 ---
 
-## 第 5 步（非常重要）：把抓取入参改成你实际 actor 的 schema
+## 7. 上 GitHub 自动每天 10:00 发送
 
-现在代码里的抓取入参是“通用占位字段”，不是你 actor 的精确字段。
+### 7.1 先把代码推上去
 
-你要做的是把两个 actor 的 Input JSON（在 Apify actor 页面可复制）发给我，我会直接帮你改成生产可用版本。
+在终端输入：
 
-你只需要给我：
+```bash
+git add .
+git commit -m "setup daily agent"
+git push
+```
 
-1. X actor 的 input JSON
-2. 微博 actor 的 input JSON
+### 7.2 去 GitHub 网站设置密钥
 
-我会帮你完成：
+1. 打开你的仓库网页
+2. 点 `Settings`
+3. 左边点 `Secrets and variables` -> `Actions`
+4. 点 `New repository secret`
+5. 把 `.env` 里的每个变量都加进去（变量名和值要一模一样）
 
-- 精确字段映射
-- 数据去重
-- 异常兜底
+### 7.3 手动跑一次验证
 
+1. 点仓库上方 `Actions`
+2. 选 `Daily AI Briefing`
+3. 点 `Run workflow`
+4. 日志没报错就表示成功
+
+之后系统会每天自动跑。
+
+---
+
+## 8. 你现在只需要发我 2 个东西（我来改到生产可用）
+
+请把下面两段 JSON 发我：
+
+1. 你 X actor 的 input JSON
+2. 你微博 actor 的 input JSON
+
+我会直接帮你把字段对齐，避免“跑得通但数据不准”。
