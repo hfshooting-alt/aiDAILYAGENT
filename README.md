@@ -74,3 +74,7 @@ npm run list:actors
 - 你的微博 actor input 示例 JSON
 
 我会把 `src/main.js` 里的 `buildPlatformInput` 精确替换成你的 schema，并加去重/清洗逻辑。
+
+## 看不懂技术细节？按这个小白教程做
+
+请直接看：`docs/STEP_BY_STEP_CN.md`
