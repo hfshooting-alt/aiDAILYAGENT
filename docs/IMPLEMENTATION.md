@@ -1,32 +1,15 @@
-# 落地实施路线图（按你现有 API）
+# 逻辑链路（Vercel 优化版）
 
-## 第 1 步：确认两个 actor
+1. **Vercel Cron** 每天触发 `/api/daily-report`
+2. API 调用 `runDailyBriefing()`
+3. `runDailyBriefing()`：
+   - Apify: 列 actor / 运行 actor / 读 dataset
+   - OpenAI: 生成中文日报
+   - SMTP: 发送邮件
+4. 返回执行结果 JSON，便于日志排查
 
-1. 配置 `APIFY_TOKEN`
-2. 运行：`npm run list:actors`
-3. 找到：
-   - 一个 X 抓取 actor
-   - 一个微博抓取 actor
-4. 将它们的 ID 写入：
-   - `APIFY_X_ACTOR_ID`
-   - `APIFY_WEIBO_ACTOR_ID`
+## 为什么更简单
 
-## 第 2 步：跑通日报链路
-
-1. 配置 OpenAI 与 SMTP 环境变量
-2. 运行：`npm start`
-3. 确认收到日报邮件
-
-## 第 3 步：对齐真实 schema（关键）
-
-当前 `buildPlatformInput` 用的是通用字段名。你给我两个 actor 的 input JSON 后，我会：
-
-1. 精确改字段映射
-2. 增加参数校验
-3. 增加数据清洗（去重、无效项过滤）
-
-## 第 4 步：上线自动化
-
-1. 配置 GitHub Actions Secrets
-2. 手动触发一次 workflow 验证
-3. 启用每天 10:00（北京时间）自动发送
+- 不依赖 GitHub Actions（可选保留）
+- 你只维护一套环境变量（Vercel）
+- 浏览器可直接访问接口做健康检查
