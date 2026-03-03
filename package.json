@@ -1,0 +1,17 @@
+{
+  "name": "ai-daily-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.js",
+    "check": "node --check src/main.js"
+  },
+  "dependencies": {
+    "apify-client": "^2.10.0",
+    "dayjs": "^1.11.13",
+    "dotenv": "^16.4.5",
+    "nodemailer": "^6.9.14",
+    "openai": "^4.56.0"
+  }
+}
