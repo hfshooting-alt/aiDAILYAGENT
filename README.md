@@ -51,3 +51,13 @@ npm start
 ## 关键提醒
 
 当前 `buildPlatformInput` 是通用占位字段。你把 X/微博 actor 的 input JSON 发我后，我可以改成你的专用 schema，数据质量会明显更高。
+
+
+## OpenAI 限流（TPM）报错时的快速处理
+
+如果出现 `rate_limit_exceeded` / `Request too large ... tokens per min`，可在环境变量里降低输入规模：
+
+- `PROMPT_X_MAX_ITEMS=20`
+- `PROMPT_WEIBO_MAX_ITEMS=20`
+
+默认各 35 条；你可以继续降到 10 做验证。

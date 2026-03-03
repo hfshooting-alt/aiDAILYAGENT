@@ -144,12 +144,69 @@ async function collectDailySignals() {
   return { xItems, weiboItems, xActorId, weiboActorId };
 }
 
+
+function parsePositiveInt(value, fallback) {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
+function truncateString(value, maxLength = 600) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+function compactItem(item) {
+  if (!item || typeof item !== 'object') {
+    return item;
+  }
+
+  const preferredKeys = [
+    'id',
+    'url',
+    'author',
+    'username',
+    'screenName',
+    'text',
+    'content',
+    'createdAt',
+    'publishedAt',
+    'type',
+    'language',
+    'likes',
+    'retweets',
+    'reposts',
+    'comments'
+  ];
+
+  const picked = {};
+  for (const key of preferredKeys) {
+    if (item[key] !== undefined) {
+      picked[key] = truncateString(item[key]);
+    }
+  }
+
+  if (Object.keys(picked).length === 0) {
+    for (const [key, value] of Object.entries(item).slice(0, 12)) {
+      picked[key] = truncateString(value);
+    }
+  }
+
+  return picked;
+}
+
+function prepareItemsForPrompt(items, platformName) {
+  const maxItems = parsePositiveInt(process.env[`PROMPT_${platformName}_MAX_ITEMS`], 35);
+  return (Array.isArray(items) ? items : []).slice(0, maxItems).map(compactItem);
+}
+
 async function generateBriefing({ xItems, weiboItems }) {
   const openai = new OpenAI({ apiKey: requiredEnv('OPENAI_API_KEY') });
   const prompt = buildDailyPrompt({
     date: dayjs().format('YYYY-MM-DD'),
-    xItems,
-    weiboItems
+    xItems: prepareItemsForPrompt(xItems, 'X'),
+    weiboItems: prepareItemsForPrompt(weiboItems, 'WEIBO')
   });
 
   const response = await openai.responses.create({
