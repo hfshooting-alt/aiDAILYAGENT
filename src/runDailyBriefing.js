@@ -1,11 +1,26 @@
 import dayjs from 'dayjs';
 import OpenAI from 'openai';
 import nodemailer from 'nodemailer';
-import { X_TARGETS, WEIBO_TARGETS } from './targets.js';
+import { X_TARGETS, WEIBO_TARGETS, X_TARGET_PROFILES, WEIBO_TARGET_PROFILES } from './targets.js';
 import { buildDailyPrompt } from './prompt.js';
 
 const X_ACTOR_KEYWORDS = ['twitter', 'x.com', 'x ', 'tweet'];
 const WEIBO_ACTOR_KEYWORDS = ['weibo', '微博'];
+
+function normalizeIdentity(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, '')
+    .replace(/\s+/g, '');
+}
+
+const X_TARGET_SET = new Set(X_TARGETS.map(normalizeIdentity));
+const WEIBO_TARGET_SET = new Set(WEIBO_TARGETS.map(normalizeIdentity));
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -100,33 +115,78 @@ async function runActorAndFetchItems({ actorId, input }) {
   const datasetUrl = buildApifyUrl(`/v2/datasets/${datasetId}/items`, {
     clean: true,
     desc: true,
-    limit: 200
+    limit: parsePositiveInt(process.env.APIFY_FETCH_LIMIT, 80)
   });
 
   return fetchJson(datasetUrl);
+}
+
+function pickIdentityCandidates(item) {
+  const candidates = new Set();
+  const directKeys = [
+    'username',
+    'userName',
+    'screenName',
+    'author',
+    'authorName',
+    'handle',
+    'ownerUsername',
+    'ownerScreenName'
+  ];
+
+  for (const key of directKeys) {
+    if (typeof item?.[key] === 'string') {
+      candidates.add(normalizeIdentity(item[key]));
+    }
+  }
+
+  const userObjKeys = ['user', 'authorProfile', 'owner'];
+  for (const key of userObjKeys) {
+    const obj = item?.[key];
+    if (!obj || typeof obj !== 'object') {
+      continue;
+    }
+    for (const nested of ['username', 'userName', 'screenName', 'name', 'handle']) {
+      if (typeof obj[nested] === 'string') {
+        candidates.add(normalizeIdentity(obj[nested]));
+      }
+    }
+  }
+
+  return [...candidates].filter(Boolean);
+}
+
+function filterItemsByTargets(items, targetSet) {
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const candidates = pickIdentityCandidates(item);
+    return candidates.some((identity) => targetSet.has(identity));
+  });
 }
 
 function buildPlatformInput({ platform, fromDate }) {
   if (platform === 'X') {
     return {
       handles: X_TARGETS,
-      includeReplies: true,
+      includeReplies: false,
       includeRetweets: true,
-      includeLikes: true,
-      fromDate
+      includeLikes: false,
+      fromDate,
+      ...parseJsonEnv('APIFY_X_INPUT_JSON')
     };
   }
 
   return {
     keywordsOrUsers: WEIBO_TARGETS,
-    includeComments: true,
+    includeComments: false,
     includeReposts: true,
-    fromDate
+    fromDate,
+    ...parseJsonEnv('APIFY_WEIBO_INPUT_JSON')
   };
 }
 
 async function collectDailySignals() {
-  const fromDate = dayjs().subtract(1, 'day').startOf('day').toISOString();
+  const lookbackDays = parsePositiveInt(process.env.APIFY_LOOKBACK_DAYS, 2);
+  const fromDate = dayjs().subtract(lookbackDays, 'day').startOf('day').toISOString();
   const xActorId = await resolveActorId('X');
   const weiboActorId = await resolveActorId('WEIBO');
 
@@ -141,13 +201,38 @@ async function collectDailySignals() {
     })
   ]);
 
-  return { xItems, weiboItems, xActorId, weiboActorId };
+  const filteredXItems = filterItemsByTargets(xItems, X_TARGET_SET);
+  const filteredWeiboItems = filterItemsByTargets(weiboItems, WEIBO_TARGET_SET);
+
+  console.log('Signal filtering summary', {
+    strictFilter: true,
+    xBefore: xItems.length,
+    xAfter: filteredXItems.length,
+    weiboBefore: weiboItems.length,
+    weiboAfter: filteredWeiboItems.length
+  });
+
+  return { xItems: filteredXItems, weiboItems: filteredWeiboItems, xActorId, weiboActorId };
 }
 
 
 function parsePositiveInt(value, fallback) {
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
+function parseJsonEnv(name) {
+  const raw = process.env[name];
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${name}: ${error.message}`);
+  }
 }
 
 function truncateString(value, maxLength = 600) {
@@ -206,7 +291,9 @@ async function generateBriefing({ xItems, weiboItems }) {
   const prompt = buildDailyPrompt({
     date: dayjs().format('YYYY-MM-DD'),
     xItems: prepareItemsForPrompt(xItems, 'X'),
-    weiboItems: prepareItemsForPrompt(weiboItems, 'WEIBO')
+    weiboItems: prepareItemsForPrompt(weiboItems, 'WEIBO'),
+    xProfiles: X_TARGET_PROFILES,
+    weiboProfiles: WEIBO_TARGET_PROFILES
   });
 
   const response = await openai.responses.create({
@@ -221,6 +308,27 @@ async function generateBriefing({ xItems, weiboItems }) {
   }
 
   return text;
+}
+
+function renderDailyHtml(subject, body) {
+  const sanitized = body
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br/>');
+
+  return `<!doctype html>
+<html lang="zh-CN">
+  <body style="margin:0;padding:0;background:linear-gradient(135deg,#0f172a,#1e293b);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;">
+    <div style="max-width:860px;margin:24px auto;padding:20px;">
+      <div style="background:#ffffff;border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,.15);">
+        <div style="font-size:14px;color:#475569;margin-bottom:8px;">AI DAILY BRIEFING</div>
+        <h1 style="margin:0 0 16px 0;font-size:24px;color:#0f172a;">${subject}</h1>
+        <div style="line-height:1.75;color:#111827;font-size:15px;white-space:normal;">${sanitized}</div>
+      </div>
+    </div>
+  </body>
+</html>`;
 }
 
 async function sendEmail(subject, body) {
@@ -238,7 +346,8 @@ async function sendEmail(subject, body) {
     from: requiredEnv('EMAIL_FROM'),
     to: requiredEnv('EMAIL_TO'),
     subject,
-    text: body
+    text: body,
+    html: renderDailyHtml(subject, body)
   });
 }
 

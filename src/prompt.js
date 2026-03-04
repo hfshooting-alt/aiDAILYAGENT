@@ -1,3 +1,37 @@
-export function buildDailyPrompt({ date, xItems, weiboItems }) {
-  return `你是一个科技情报编辑。请根据以下抓取数据，生成一份“AI 领袖动态日报”（中文）。\n\n日期：${date}\n\n要求：\n1) 按人物分组整理，重点覆盖：发言观点、点赞/转发/评论行为、涉及事件。\n2) 每个人最多 3 条核心信息，不要流水账。\n3) 每条信息必须包含：\n   - 行为（发帖/点赞/转发/评论）\n   - 观点/态度摘要\n   - 背后事件或上下文（如果可判断）\n4) 输出结构：\n   - 今日总览（5-8 条）\n   - X 人物动态（10 人）\n   - 微博人物动态（10 人）\n   - 趋势与风险提示（3-5 条）\n   - 明日重点关注（3 条）\n5) 风格：简洁、专业、可读性高。\n\nX 数据：\n${JSON.stringify(xItems, null, 2)}\n\n微博数据：\n${JSON.stringify(weiboItems, null, 2)}\n`;
+export function buildDailyPrompt({ date, xItems, weiboItems, xProfiles, weiboProfiles }) {
+  return `你是中文科技日报编辑。请生成“AI 每日简报”（中文纯文本）。
+
+日期：${date}
+
+硬性格式要求（按顺序输出）：
+1) 今日 AI 局势（国内 + 国外）
+   - 仅输出 6-8 条关键 bullet points
+   - 每条一句话，先写结论再写原因
+2) 博主动态（X）
+   - 仅限以下人物，且每人最多 2 条
+   - 每个人格式：人物名（主页链接）+ 两条动态
+3) 博主动态（微博）
+   - 仅限以下人物，且每人最多 2 条
+   - 每个人格式：人物名（主页链接）+ 两条动态
+4) 明日关注
+   - 3 条
+
+输出风格限制：
+- 不要使用 Markdown 标题符号（例如 #、##、###）
+- 不要使用星号强调（例如 *文本*）
+- 用自然中文，简洁专业
+- 若某人物当日无有效动态，写“暂无高价值更新”
+
+X 人物白名单（含主页）：
+${JSON.stringify(xProfiles, null, 2)}
+
+微博人物白名单（含主页）：
+${JSON.stringify(weiboProfiles, null, 2)}
+
+X 抓取数据：
+${JSON.stringify(xItems, null, 2)}
+
+微博抓取数据：
+${JSON.stringify(weiboItems, null, 2)}
+`;
 }
