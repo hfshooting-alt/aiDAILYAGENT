@@ -310,21 +310,46 @@ async function generateBriefing({ xItems, weiboItems }) {
   return text;
 }
 
-function renderDailyHtml(subject, body) {
-  const sanitized = body
+function escapeHtml(value) {
+  return String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br/>');
+    .replace(/>/g, '&gt;');
+}
+
+function linkifyLine(line) {
+  return line.replace(/https?:\/\/[^\s)]+/g, (url) => {
+    const href = encodeURI(url);
+    return `<a href="${href}" style="color:#2563eb;text-decoration:underline;word-break:break-all;">${escapeHtml(url)}</a>`;
+  });
+}
+
+function renderDailyHtml(subject, body) {
+  const lines = String(body).split(/\r?\n/);
+  const content = lines
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return '<div style="height:10px;"></div>';
+      }
+
+      if (/^【.+】$/.test(trimmed)) {
+        return `<h2 style="margin:16px 0 8px;font-size:18px;font-weight:800;letter-spacing:.3px;color:#0f172a;text-transform:uppercase;">${escapeHtml(trimmed)}</h2>`;
+      }
+
+      const escaped = escapeHtml(line);
+      return `<p style="margin:0 0 8px;line-height:1.75;font-size:15px;color:#111827;">${linkifyLine(escaped)}</p>`;
+    })
+    .join('');
 
   return `<!doctype html>
 <html lang="zh-CN">
   <body style="margin:0;padding:0;background:linear-gradient(135deg,#0f172a,#1e293b);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;">
     <div style="max-width:860px;margin:24px auto;padding:20px;">
       <div style="background:#ffffff;border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,.15);">
-        <div style="font-size:14px;color:#475569;margin-bottom:8px;">AI DAILY BRIEFING</div>
-        <h1 style="margin:0 0 16px 0;font-size:24px;color:#0f172a;">${subject}</h1>
-        <div style="line-height:1.75;color:#111827;font-size:15px;white-space:normal;">${sanitized}</div>
+        <div style="font-size:14px;color:#475569;margin-bottom:8px;font-weight:700;letter-spacing:.6px;">AI DAILY BRIEFING</div>
+        <h1 style="margin:0 0 16px 0;font-size:26px;font-weight:900;letter-spacing:.4px;color:#0f172a;text-transform:uppercase;">${escapeHtml(subject)}</h1>
+        <div style="white-space:normal;">${content}</div>
       </div>
     </div>
   </body>

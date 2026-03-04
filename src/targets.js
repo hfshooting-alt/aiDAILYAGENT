@@ -11,18 +11,23 @@ export const X_TARGET_PROFILES = [
   { name: 'Ethan Mollick', handle: 'emollick', homepage: 'https://x.com/emollick' }
 ];
 
-export const WEIBO_TARGET_PROFILES = [
-  { name: '周鸿祎', homepage: 'https://weibo.com/n/周鸿祎' },
-  { name: '李开复', homepage: 'https://weibo.com/n/李开复' },
-  { name: '宝玉xp', homepage: 'https://weibo.com/n/宝玉xp' },
-  { name: '数字生命卡兹克', homepage: 'https://weibo.com/n/数字生命卡兹克' },
-  { name: '阑夕', homepage: 'https://weibo.com/n/阑夕' },
-  { name: '归藏的AI漫游指南', homepage: 'https://weibo.com/n/归藏的AI漫游指南' },
-  { name: '爱可可-爱生活', homepage: 'https://weibo.com/n/爱可可-爱生活' },
-  { name: '稚晖君', homepage: 'https://weibo.com/n/稚晖君' },
-  { name: '何小鹏', homepage: 'https://weibo.com/n/何小鹏' },
-  { name: '王小川', homepage: 'https://weibo.com/n/王小川' }
+const WEIBO_TARGET_NAMES = [
+  '周鸿祎',
+  '李开复',
+  '宝玉xp',
+  '数字生命卡兹克',
+  '阑夕',
+  '归藏的AI漫游指南',
+  '爱可可-爱生活',
+  '稚晖君',
+  '何小鹏',
+  '王小川'
 ];
+
+export const WEIBO_TARGET_PROFILES = WEIBO_TARGET_NAMES.map((name) => ({
+  name,
+  homepage: `https://weibo.com/n/${encodeURIComponent(name)}`
+}));
 
 export const X_TARGETS = X_TARGET_PROFILES.map((item) => item.handle);
 export const WEIBO_TARGETS = WEIBO_TARGET_PROFILES.map((item) => item.name);
