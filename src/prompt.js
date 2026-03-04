@@ -12,10 +12,12 @@ export function buildDailyPrompt({ date, xItems, weiboItems, xProfiles, weiboPro
    - 仅限以下人物，且每人最多 2 条
    - 每个人格式：人物名（主页链接）
    - 每条动态格式：- 动态摘要（原帖链接：URL；时间：YYYY-MM-DD HH:mm，若缺失则写“未知”）
+   - 同一人物的两条动态不能重复同一观点
 3) 【WEIBO BLOGGER UPDATES｜博主动态（微博）】
    - 仅限以下人物，且每人最多 2 条
    - 每个人格式：人物名（主页链接）
    - 每条动态格式：- 动态摘要（原帖链接：URL；时间：YYYY-MM-DD HH:mm，若缺失则写“未知”）
+   - 同一人物的两条动态不能重复同一观点
 4) 【WATCHLIST FOR TOMORROW｜明日关注】
    - 2 条
 
@@ -25,6 +27,7 @@ export function buildDailyPrompt({ date, xItems, weiboItems, xProfiles, weiboPro
 - 用自然中文，简洁专业
 - 标题行必须严格使用以上【...】格式，独占一行
 - 若某人物当日无有效动态，写“暂无高价值更新”
+- 严禁编造链接；若无可用链接，写“原帖链接：未知”
 
 X 人物白名单（含主页）：
 ${JSON.stringify(xProfiles, null, 2)}

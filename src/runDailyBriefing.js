@@ -356,6 +356,28 @@ function renderDailyHtml(subject, body) {
 </html>`;
 }
 
+
+function buildExecutionMeta({ xCount, weiboCount }) {
+  return [
+    '【EXECUTION SUMMARY｜执行摘要】',
+    `- X 目标信号条数：${xCount}`,
+    `- 微博目标信号条数：${weiboCount}`,
+    `- 生成模型：${process.env.OPENAI_MODEL || 'unknown'}`,
+    ''
+  ].join('\n');
+}
+
+function removeConsecutiveDuplicateLines(text) {
+  const lines = String(text).split(/\r?\n/);
+  const out = [];
+  for (const line of lines) {
+    if (out.length === 0 || out[out.length - 1].trim() !== line.trim() || !line.trim()) {
+      out.push(line);
+    }
+  }
+  return out.join('\n').trim();
+}
+
 async function sendEmail(subject, body) {
   const transporter = nodemailer.createTransport({
     host: requiredEnv('SMTP_HOST'),
@@ -380,8 +402,11 @@ export async function runDailyBriefing() {
   const { xItems, weiboItems, xActorId, weiboActorId } = await collectDailySignals();
   const briefing = await generateBriefing({ xItems, weiboItems });
   const subject = `AI 领袖动态日报 - ${dayjs().format('YYYY-MM-DD')}`;
+  const fullBody = removeConsecutiveDuplicateLines(
+    `${buildExecutionMeta({ xCount: xItems.length, weiboCount: weiboItems.length })}${briefing}`
+  );
 
-  await sendEmail(subject, briefing);
+  await sendEmail(subject, fullBody);
 
   return {
     subject,
