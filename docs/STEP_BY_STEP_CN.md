@@ -83,3 +83,31 @@
 
 `vercel.json` 已配置每天北京时间 10:00 触发。
 
+
+
+## G. 把抓取范围牢牢限制在 20 人 + 最近两天（省钱关键）
+
+在 GitHub Actions Secrets（或 Vercel 环境变量）新增：
+
+- `APIFY_LOOKBACK_DAYS=2`
+- `APIFY_FETCH_LIMIT=80`
+- `PROMPT_X_MAX_ITEMS=20`
+- `PROMPT_WEIBO_MAX_ITEMS=20`
+
+如需更细粒度，新增（可选）：
+
+- `APIFY_X_INPUT_JSON`
+- `APIFY_WEIBO_INPUT_JSON`
+
+示例值（按你的 actor schema 调整）：
+
+`{"maxItems":40,"sort":"latest"}`
+
+然后去 Apify actor 页面确认：
+
+1. Input 只留目标账号（不要泛关键词）
+2. 时间范围设最近 2 天
+3. maxItems 设 40~80
+4. 保存为默认输入
+
+最后再触发一次 workflow，观察日志里的 `xBefore/xAfter` 和 `weiboBefore/weiboAfter`。

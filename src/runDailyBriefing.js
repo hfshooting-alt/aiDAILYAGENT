@@ -115,7 +115,7 @@ async function runActorAndFetchItems({ actorId, input }) {
   const datasetUrl = buildApifyUrl(`/v2/datasets/${datasetId}/items`, {
     clean: true,
     desc: true,
-    limit: parsePositiveInt(process.env.APIFY_FETCH_LIMIT, 120)
+    limit: parsePositiveInt(process.env.APIFY_FETCH_LIMIT, 80)
   });
 
   return fetchJson(datasetUrl);
@@ -167,23 +167,26 @@ function buildPlatformInput({ platform, fromDate }) {
   if (platform === 'X') {
     return {
       handles: X_TARGETS,
-      includeReplies: true,
+      includeReplies: false,
       includeRetweets: true,
-      includeLikes: true,
-      fromDate
+      includeLikes: false,
+      fromDate,
+      ...parseJsonEnv('APIFY_X_INPUT_JSON')
     };
   }
 
   return {
     keywordsOrUsers: WEIBO_TARGETS,
-    includeComments: true,
+    includeComments: false,
     includeReposts: true,
-    fromDate
+    fromDate,
+    ...parseJsonEnv('APIFY_WEIBO_INPUT_JSON')
   };
 }
 
 async function collectDailySignals() {
-  const fromDate = dayjs().subtract(1, 'day').startOf('day').toISOString();
+  const lookbackDays = parsePositiveInt(process.env.APIFY_LOOKBACK_DAYS, 2);
+  const fromDate = dayjs().subtract(lookbackDays, 'day').startOf('day').toISOString();
   const xActorId = await resolveActorId('X');
   const weiboActorId = await resolveActorId('WEIBO');
 
@@ -216,6 +219,20 @@ async function collectDailySignals() {
 function parsePositiveInt(value, fallback) {
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
+function parseJsonEnv(name) {
+  const raw = process.env[name];
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${name}: ${error.message}`);
+  }
 }
 
 function truncateString(value, maxLength = 600) {

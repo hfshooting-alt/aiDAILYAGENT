@@ -100,3 +100,50 @@ npm start
 方案 B：Vercel Cron
 
 - `vercel.json` 已配置同样的 `0 2 * * *`，部署后会自动触发 `/api/daily-report`。
+
+
+## Apify 抓取控量（重点：省钱）
+
+你可以在“抓取阶段”就把范围卡死，避免无关账号导致 token 浪费。
+
+建议在 GitHub Actions Secrets / Vercel Env 设置：
+
+- `APIFY_LOOKBACK_DAYS=2`（只看最近两天）
+- `APIFY_FETCH_LIMIT=80`（每个平台最多拉 80 条）
+- `PROMPT_X_MAX_ITEMS=20`（先保守）
+- `PROMPT_WEIBO_MAX_ITEMS=20`（先保守）
+
+并且可传 actor 原生参数覆盖（高级）：
+
+- `APIFY_X_INPUT_JSON`
+- `APIFY_WEIBO_INPUT_JSON`
+
+例如（示例，按你的 actor schema 调整）：
+
+```json
+{"maxItems":40,"sort":"latest","onlyVerified":false}
+```
+
+> 注意：这两个变量必须是“合法 JSON 字符串”。
+
+### 你在 Apify 控台里应该这样设置（一步步）
+
+1. 打开 Apify -> Actors -> 你的 X 抓取 Actor
+2. 点 `Input`
+3. 核对只包含这 10 个 X 账号（不要关键词泛搜）
+4. 把时间范围字段设为“最近2天”（如 `fromDate` / `since`）
+5. 将数量上限字段设低（如 `maxItems=40~80`）
+6. 点击 `Save as default input`
+
+微博 actor 同样重复 1~6 步：
+
+- 只保留你指定的 10 个微博博主
+- 时间范围最近2天
+- 数量上限 40~80
+
+运行后看日志中的过滤统计：
+
+- `xBefore/xAfter`
+- `weiboBefore/weiboAfter`
+
+如果 `Before` 远大于 `After`，说明 actor 仍抓了无关内容，需要继续收紧 actor input。
