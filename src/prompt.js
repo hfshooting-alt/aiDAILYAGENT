@@ -7,12 +7,15 @@ export function buildDailyPrompt({ date, xItems, weiboItems, xProfiles, weiboPro
 1) 【TODAY AI LANDSCAPE｜今日AI局势】
    - 仅输出 3-4 条关键 bullet points
    - 每条一句话，先写结论再写原因
+   - 每条开头必须带地区标签：[国内] 或 [国际]
 2) 【X BLOGGER UPDATES｜博主动态（X）】
    - 仅限以下人物，且每人最多 2 条
-   - 每个人格式：人物名（主页链接）+ 两条动态
+   - 每个人格式：人物名（主页链接）
+   - 每条动态格式：- 动态摘要（原帖链接：URL；时间：YYYY-MM-DD HH:mm，若缺失则写“未知”）
 3) 【WEIBO BLOGGER UPDATES｜博主动态（微博）】
    - 仅限以下人物，且每人最多 2 条
-   - 每个人格式：人物名（主页链接）+ 两条动态
+   - 每个人格式：人物名（主页链接）
+   - 每条动态格式：- 动态摘要（原帖链接：URL；时间：YYYY-MM-DD HH:mm，若缺失则写“未知”）
 4) 【WATCHLIST FOR TOMORROW｜明日关注】
    - 2 条
 
