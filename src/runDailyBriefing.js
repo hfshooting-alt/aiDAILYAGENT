@@ -16,11 +16,57 @@ function normalizeIdentity(value) {
     .trim()
     .toLowerCase()
     .replace(/^@/, '')
-    .replace(/\s+/g, '');
+    .replace(/^https?:\/\/(www\.)?(x|twitter|weibo)\.com\/(n\/)?/g, '')
+    .replace(/^u\//, '')
+    .replace(/[/?#].*$/, '')
+    .replace(/[._\-\s]+/g, '');
 }
 
 const X_TARGET_SET = new Set(X_TARGETS.map(normalizeIdentity));
 const WEIBO_TARGET_SET = new Set(WEIBO_TARGETS.map(normalizeIdentity));
+
+
+function parseOptionalPositiveInt(value) {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+function resolveHardMaxItems(platform) {
+  const perPlatform = parseOptionalPositiveInt(process.env[`APIFY_${platform}_MAX_ITEMS`]);
+  if (perPlatform) {
+    return perPlatform;
+  }
+  return parsePositiveInt(process.env.APIFY_FETCH_LIMIT, 80);
+}
+
+function buildHardLimitFields(platform, maxItems) {
+  if (platform === 'X') {
+    return {
+      maxItems,
+      maxTweets: maxItems,
+      resultsLimit: maxItems,
+      limit: maxItems
+    };
+  }
+
+  return {
+    maxItems,
+    maxPosts: maxItems,
+    resultsLimit: maxItems,
+    limit: maxItems
+  };
+}
+
+function buildHardTimeFields(fromDate) {
+  return {
+    fromDate,
+    since: fromDate,
+    startDate: fromDate
+  };
+}
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -131,7 +177,9 @@ function pickIdentityCandidates(item) {
     'authorName',
     'handle',
     'ownerUsername',
-    'ownerScreenName'
+    'ownerScreenName',
+    'userId',
+    'ownerName'
   ];
 
   for (const key of directKeys) {
@@ -140,16 +188,22 @@ function pickIdentityCandidates(item) {
     }
   }
 
-  const userObjKeys = ['user', 'authorProfile', 'owner'];
+  const userObjKeys = ['user', 'authorProfile', 'owner', 'author', 'authorData'];
   for (const key of userObjKeys) {
     const obj = item?.[key];
     if (!obj || typeof obj !== 'object') {
       continue;
     }
-    for (const nested of ['username', 'userName', 'screenName', 'name', 'handle']) {
+    for (const nested of ['username', 'userName', 'screenName', 'name', 'handle', 'profileUrl', 'url']) {
       if (typeof obj[nested] === 'string') {
         candidates.add(normalizeIdentity(obj[nested]));
       }
+    }
+  }
+
+  for (const linkKey of ['url', 'authorUrl', 'profileUrl', 'userUrl', 'permalink']) {
+    if (typeof item?.[linkKey] === 'string') {
+      candidates.add(normalizeIdentity(item[linkKey]));
     }
   }
 
@@ -164,14 +218,20 @@ function filterItemsByTargets(items, targetSet) {
 }
 
 function buildPlatformInput({ platform, fromDate }) {
+  const hardMaxItems = resolveHardMaxItems(platform);
+  const hardLimits = buildHardLimitFields(platform, hardMaxItems);
+  const hardTime = buildHardTimeFields(fromDate);
+
   if (platform === 'X') {
     return {
       handles: X_TARGETS,
       includeReplies: false,
       includeRetweets: true,
       includeLikes: false,
-      fromDate,
-      ...parseJsonEnv('APIFY_X_INPUT_JSON')
+      ...hardTime,
+      ...parseJsonEnv('APIFY_X_INPUT_JSON'),
+      ...hardLimits,
+      ...hardTime
     };
   }
 
@@ -179,8 +239,10 @@ function buildPlatformInput({ platform, fromDate }) {
     keywordsOrUsers: WEIBO_TARGETS,
     includeComments: false,
     includeReposts: true,
-    fromDate,
-    ...parseJsonEnv('APIFY_WEIBO_INPUT_JSON')
+    ...hardTime,
+    ...parseJsonEnv('APIFY_WEIBO_INPUT_JSON'),
+    ...hardLimits,
+    ...hardTime
   };
 }
 
@@ -250,13 +312,20 @@ function compactItem(item) {
   const preferredKeys = [
     'id',
     'url',
+    'tweetUrl',
+    'permalink',
+    'authorUrl',
     'author',
+    'authorName',
     'username',
     'screenName',
     'text',
     'content',
     'createdAt',
     'publishedAt',
+    'date',
+    'timestamp',
+    'time',
     'type',
     'language',
     'likes',

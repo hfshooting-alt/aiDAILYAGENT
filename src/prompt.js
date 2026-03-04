@@ -2,12 +2,14 @@ export function buildDailyPrompt({ date, xItems, weiboItems, xProfiles, weiboPro
   return `你是中文科技日报编辑。请生成“AI 每日简报”（中文纯文本）。
 
 日期：${date}
+X 信号条数：${Array.isArray(xItems) ? xItems.length : 0}
+微博信号条数：${Array.isArray(weiboItems) ? weiboItems.length : 0}
 
 硬性格式要求（按顺序输出）：
 1) 【TODAY AI LANDSCAPE｜今日AI局势】
-   - 仅输出 3-4 条关键 bullet points
+   - 必须先输出“[国内]”小节（1-2 条），再输出“[国际]”小节（1-2 条）
    - 每条一句话，先写结论再写原因
-   - 每条开头必须带地区标签：[国内] 或 [国际]
+   - 严禁把国内和国际混在同一条里
 2) 【X BLOGGER UPDATES｜博主动态（X）】
    - 仅限以下人物，且每人最多 2 条
    - 每个人格式：人物名（主页链接）
@@ -21,13 +23,17 @@ export function buildDailyPrompt({ date, xItems, weiboItems, xProfiles, weiboPro
 4) 【WATCHLIST FOR TOMORROW｜明日关注】
    - 2 条
 
+强约束（必须遵守）：
+- 只能使用“抓取数据”里真实存在的信息，不允许臆造
+- 如果某条动态找不到原帖链接，必须写“原帖链接：未知”
+- 如果某条动态找不到时间，必须写“时间：未知”
+- 如果某平台信号条数为 0，则该平台所有人物都统一写“暂无高价值更新”，且不要编写具体动态
+
 输出风格限制：
 - 不要使用 Markdown 标题符号（例如 #、##、###）
 - 不要使用星号强调（例如 *文本*）
 - 用自然中文，简洁专业
 - 标题行必须严格使用以上【...】格式，独占一行
-- 若某人物当日无有效动态，写“暂无高价值更新”
-- 严禁编造链接；若无可用链接，写“原帖链接：未知”
 
 X 人物白名单（含主页）：
 ${JSON.stringify(xProfiles, null, 2)}
