@@ -353,6 +353,73 @@ async function fetchWeiboStatusMeta(postId) {
   };
 }
 
+async function fetchWeiboHomepageHtml(uid) {
+  const headers = await buildWeiboRequestHeaders(uid);
+  const response = await fetch(`https://m.weibo.cn/u/${encodeURIComponent(uid)}`, { headers });
+  if (!response.ok) {
+    return '';
+  }
+  return response.text();
+}
+
+function extractStatusIdsFromHtml(html) {
+  const text = typeof html === 'string' ? html : '';
+  const ids = new Set();
+  const patterns = [/\/status\/([a-zA-Z0-9]+)/g, /"id"\s*:\s*"([a-zA-Z0-9]+)"/g];
+
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const id = match[1];
+      if (id && id.length >= 6) {
+        ids.add(id);
+      }
+      if (ids.size >= 40) {
+        break;
+      }
+    }
+  }
+
+  return [...ids];
+}
+
+async function fetchWeiboPostsFromHomepageFallback(uid, fromDate, perUserLimit, seenPostIds) {
+  const html = await fetchWeiboHomepageHtml(uid);
+  const statusIds = extractStatusIdsFromHtml(html);
+  const posts = [];
+
+  for (const statusId of statusIds) {
+    if (seenPostIds.has(String(statusId))) {
+      continue;
+    }
+
+    const meta = await fetchWeiboStatusMeta(statusId);
+    if (!meta || !isRecentEnough(meta.createdAt, fromDate)) {
+      continue;
+    }
+
+    const postId = String(statusId);
+    seenPostIds.add(postId);
+    posts.push({
+      postId,
+      postUrl: `https://m.weibo.cn/status/${postId}`,
+      text: meta.text,
+      createdAt: meta.createdAt,
+      userId: meta.userId || uid,
+      screenName: meta.screenName,
+      authorName: meta.screenName,
+      authorUrl: meta.profileUrl || `https://m.weibo.cn/u/${uid}`,
+      profileUrl: meta.profileUrl || `https://m.weibo.cn/u/${uid}`
+    });
+
+    if (posts.length >= perUserLimit) {
+      break;
+    }
+  }
+
+  return posts;
+}
+
 
 function isRecentEnough(createdAt, fromDate) {
   if (!createdAt) {
@@ -406,15 +473,10 @@ function extractMblogsFromCards(cards) {
 }
 
 async function fetchWeiboProfileInfo(uid) {
-  const sessionCookie = await fetchWeiboSessionCookie(uid);
+  const requestHeaders = await buildWeiboRequestHeaders(uid);
   const url = `https://m.weibo.cn/profile/info?uid=${encodeURIComponent(uid)}`;
   const response = await fetch(url, {
-    headers: {
-      'user-agent': 'Mozilla/5.0',
-      referer: `https://m.weibo.cn/u/${uid}`,
-      accept: 'application/json,text/plain,*/*',
-      ...(sessionCookie ? { cookie: sessionCookie } : {})
-    }
+    headers: requestHeaders
   });
 
   if (!response.ok) {
@@ -452,8 +514,9 @@ function collectSetCookies(response) {
 async function fetchWeiboSessionCookie(uid) {
   const response = await fetch(`https://m.weibo.cn/u/${encodeURIComponent(uid)}`, {
     headers: {
-      'user-agent': 'Mozilla/5.0',
-      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1',
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8'
     }
   });
 
@@ -463,6 +526,31 @@ async function fetchWeiboSessionCookie(uid) {
 
   const cookies = collectSetCookies(response);
   return cookies.join('; ');
+}
+
+function getCookieValue(cookieHeader, key) {
+  if (!cookieHeader) {
+    return '';
+  }
+  const pair = cookieHeader
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${key}=`));
+  return pair ? decodeURIComponent(pair.slice(key.length + 1)) : '';
+}
+
+async function buildWeiboRequestHeaders(uid) {
+  const cookie = await fetchWeiboSessionCookie(uid);
+  const xsrf = getCookieValue(cookie, 'XSRF-TOKEN');
+  return {
+    'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1',
+    referer: `https://m.weibo.cn/u/${uid}`,
+    accept: 'application/json,text/plain,*/*',
+    'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'x-requested-with': 'XMLHttpRequest',
+    ...(xsrf ? { 'x-xsrf-token': xsrf } : {}),
+    ...(cookie ? { cookie } : {})
+  };
 }
 
 async function resolveWeiboContainerIds(uid) {
@@ -498,17 +586,17 @@ async function fetchWeiboTimelineByUid(uid, fromDate, perUserLimit) {
   const seenPostIds = new Set();
   const results = [];
   const containerIds = await resolveWeiboContainerIds(uid);
-  const sessionCookie = await fetchWeiboSessionCookie(uid);
+  const requestHeaders = await buildWeiboRequestHeaders(uid);
+  const containerCandidates = [...containerIds, ''];
 
-  for (const containerId of containerIds) {
+  for (const containerId of containerCandidates) {
     let sinceId = '';
 
     for (let page = 1; page <= 5 && results.length < perUserLimit; page += 1) {
-      const params = new URLSearchParams({
-        type: 'uid',
-        value: String(uid),
-        containerid: containerId
-      });
+      const params = new URLSearchParams({ type: 'uid', value: String(uid) });
+      if (containerId) {
+        params.set('containerid', containerId);
+      }
       if (sinceId) {
         params.set('since_id', sinceId);
       } else {
@@ -517,13 +605,7 @@ async function fetchWeiboTimelineByUid(uid, fromDate, perUserLimit) {
 
       const url = `https://m.weibo.cn/api/container/getIndex?${params.toString()}`;
       const response = await fetch(url, {
-        headers: {
-          'user-agent': 'Mozilla/5.0',
-          referer: `https://m.weibo.cn/u/${uid}`,
-          accept: 'application/json,text/plain,*/*',
-          'x-requested-with': 'XMLHttpRequest',
-          ...(sessionCookie ? { cookie: sessionCookie } : {})
-        }
+        headers: requestHeaders
       });
 
       if (!response.ok) {
@@ -588,7 +670,19 @@ async function fetchWeiboTimelineByUid(uid, fromDate, perUserLimit) {
   }
 
   if (results.length === 0) {
-    console.log('Weibo UID empty across containers', { uid, containerIds });
+    const homepageFallback = await fetchWeiboPostsFromHomepageFallback(uid, fromDate, perUserLimit, seenPostIds);
+    for (const post of homepageFallback) {
+      results.push(post);
+      if (results.length >= perUserLimit) {
+        break;
+      }
+    }
+  }
+
+  if (results.length === 0) {
+    console.log('Weibo UID empty across containers', { uid, containerIds: containerCandidates });
+  } else {
+    console.log('Weibo UID recovered via fallback', { uid, count: results.length });
   }
 
   return results;
