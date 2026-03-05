@@ -34,6 +34,7 @@ jobs:
           APIFY_X_INPUT_JSON: ${{ secrets.APIFY_X_INPUT_JSON }}
           APIFY_WEIBO_INPUT_JSON: ${{ secrets.APIFY_WEIBO_INPUT_JSON }}
           WEIBO_TARGET_UIDS_JSON: ${{ secrets.WEIBO_TARGET_UIDS_JSON }}
+          WEIBO_FALLBACK_PER_USER: ${{ secrets.WEIBO_FALLBACK_PER_USER }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
