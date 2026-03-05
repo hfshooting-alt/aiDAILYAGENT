@@ -33,6 +33,7 @@ jobs:
           APIFY_RUN_POLL_SECONDS: ${{ secrets.APIFY_RUN_POLL_SECONDS }}
           APIFY_X_INPUT_JSON: ${{ secrets.APIFY_X_INPUT_JSON }}
           APIFY_WEIBO_INPUT_JSON: ${{ secrets.APIFY_WEIBO_INPUT_JSON }}
+          WEIBO_TARGET_UIDS_JSON: ${{ secrets.WEIBO_TARGET_UIDS_JSON }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}

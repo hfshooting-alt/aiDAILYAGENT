@@ -27,6 +27,59 @@ const WEIBO_TARGET_SET = new Set(WEIBO_TARGETS.map(normalizeIdentity));
 const X_PROFILE_BY_IDENTITY = new Map(X_TARGET_PROFILES.map((p) => [normalizeIdentity(p.handle), p]));
 const WEIBO_PROFILE_BY_IDENTITY = new Map(WEIBO_TARGET_PROFILES.map((p) => [normalizeIdentity(p.name), p]));
 
+function extractWeiboUidFromValue(value) {
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return '';
+  }
+
+  if (/^\d+$/.test(text)) {
+    return text;
+  }
+
+  const match = text.match(/\/u\/(\d+)/i) || text.match(/uid=(\d+)/i);
+  return match?.[1] || '';
+}
+
+function buildWeiboUidTargetMap() {
+  const parsed = parseJsonEnv('WEIBO_TARGET_UIDS_JSON');
+  const out = new Map();
+
+  for (const profile of WEIBO_TARGET_PROFILES) {
+    const uidFromProfile = extractWeiboUidFromValue(profile.homepage);
+    if (uidFromProfile) {
+      out.set(uidFromProfile, profile);
+    }
+
+    const uidFromEnv = extractWeiboUidFromValue(parsed?.[profile.name]);
+    if (uidFromEnv) {
+      out.set(uidFromEnv, profile);
+    }
+  }
+
+  return out;
+}
+
+const WEIBO_PROFILE_BY_UID = buildWeiboUidTargetMap();
+
+function parseJsonEnv(name) {
+  const raw = process.env[name];
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${name}: ${error.message}`);
+  }
+}
+
 function parseOptionalPositiveInt(value) {
   if (value === undefined || value === null || value === '') {
     return undefined;
@@ -319,7 +372,7 @@ async function enrichWeiboItems(items) {
   return enriched;
 }
 
-function attachTargetForPlatform(items, profileMap, fallbackProfileByName = false) {
+function attachTargetForPlatform(items, profileMap) {
   return (Array.isArray(items) ? items : []).map((item) => {
     const identities = pickIdentityCandidates(item);
     const matchedIdentity = identities.find((id) => profileMap.has(id));
@@ -328,11 +381,21 @@ function attachTargetForPlatform(items, profileMap, fallbackProfileByName = fals
       return { ...item, _targetProfile: profileMap.get(matchedIdentity) };
     }
 
-    if (fallbackProfileByName && typeof item?.text === 'string') {
-      const byText = WEIBO_TARGET_PROFILES.find((profile) => item.text.includes(profile.name));
-      if (byText) {
-        return { ...item, _targetProfile: byText };
-      }
+    return item;
+  });
+}
+
+function attachWeiboTarget(items) {
+  return (Array.isArray(items) ? items : []).map((item) => {
+    const uid = item?.userId ? String(item.userId) : '';
+    if (uid && WEIBO_PROFILE_BY_UID.has(uid)) {
+      return { ...item, _targetProfile: WEIBO_PROFILE_BY_UID.get(uid) };
+    }
+
+    const identities = pickIdentityCandidates(item);
+    const matchedIdentity = identities.find((id) => WEIBO_PROFILE_BY_IDENTITY.has(id));
+    if (matchedIdentity) {
+      return { ...item, _targetProfile: WEIBO_PROFILE_BY_IDENTITY.get(matchedIdentity) };
     }
 
     return item;
@@ -425,12 +488,12 @@ async function collectDailySignals() {
     })
   ]);
 
-  const xWithTargets = attachTargetForPlatform(xItemsRaw, X_PROFILE_BY_IDENTITY, false);
+  const xWithTargets = attachTargetForPlatform(xItemsRaw, X_PROFILE_BY_IDENTITY);
   const filteredXItems = filterItemsByAttachedTarget(xWithTargets);
   const balancedXItems = balanceItemsAcrossTargets(filteredXItems, X_TARGET_PROFILES, resolveHardMaxItems('X'));
 
   const weiboEnriched = await enrichWeiboItems(weiboItemsRaw);
-  const weiboWithTargets = attachTargetForPlatform(weiboEnriched, WEIBO_PROFILE_BY_IDENTITY, true);
+  const weiboWithTargets = attachWeiboTarget(weiboEnriched);
   const filteredWeiboItems = filterItemsByAttachedTarget(weiboWithTargets);
   const balancedWeiboItems = balanceItemsAcrossTargets(filteredWeiboItems, WEIBO_TARGET_PROFILES, resolveHardMaxItems('WEIBO'));
 
@@ -448,20 +511,6 @@ async function collectDailySignals() {
   });
 
   return { xItems: balancedXItems, weiboItems: balancedWeiboItems, xActorId, weiboActorId };
-}
-
-function parseJsonEnv(name) {
-  const raw = process.env[name];
-  if (!raw) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (error) {
-    throw new Error(`Invalid JSON in ${name}: ${error.message}`);
-  }
 }
 
 function truncateString(value, maxLength = 600) {

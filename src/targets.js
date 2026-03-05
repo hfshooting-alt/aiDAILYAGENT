@@ -11,23 +11,17 @@ export const X_TARGET_PROFILES = [
   { name: 'Ethan Mollick', handle: 'emollick', homepage: 'https://x.com/emollick' }
 ];
 
-const WEIBO_TARGET_NAMES = [
-  '周鸿祎',
-  '李开复',
-  '宝玉xp',
-  '数字生命卡兹克',
-  '阑夕',
-  '归藏的AI漫游指南',
-  '爱可可-爱生活',
-  '稚晖君',
-  '何小鹏',
-  '王小川'
+export const WEIBO_TARGET_PROFILES = [
+  { name: '周鸿祎', homepage: 'https://m.weibo.cn/u/1708942053' },
+  { name: '宝玉xp', homepage: 'https://m.weibo.cn/u/1727858283?t=0&luicode=10000011&lfid=1076031727858283&launchid=10000360-page_H5' },
+  { name: '数字生命卡兹克', homepage: 'https://m.weibo.cn/u/5700099573?t=0&luicode=10000011&lfid=231583&launchid=10000360-page_H5' },
+  { name: '阑夕', homepage: 'https://m.weibo.cn/u/1560906700?t=0&luicode=10000011&lfid=100505172785828&launchid=10000360-page_H5' },
+  { name: '归藏的AI漫游指南', homepage: 'https://m.weibo.cn/u/6182606334' },
+  { name: '爱可可-爱生活', homepage: 'https://m.weibo.cn/u/1402400261?t=0&luicode=10000011&lfid=1076036182606334&launchid=10000360-page_H5' },
+  { name: '稚晖君', homepage: 'https://m.weibo.cn/u/1679186305?t=0&luicode=10000011&lfid=1076031402400261&launchid=10000360-page_H5' },
+  { name: '塞冬的生活日记', homepage: 'https://m.weibo.cn/u/1706699904?luicode=10000011&lfid=1005051706699904&launchid=10000360-page_H5' },
+  { name: '王小川', homepage: 'https://m.weibo.cn/u/1582488432?t=0&luicode=10000011&lfid=1076032191707743&launchid=10000360-page_H5' }
 ];
-
-export const WEIBO_TARGET_PROFILES = WEIBO_TARGET_NAMES.map((name) => ({
-  name,
-  homepage: `https://s.weibo.com/user?q=${encodeURIComponent(name)}`
-}));
 
 export const X_TARGETS = X_TARGET_PROFILES.map((item) => item.handle);
 export const WEIBO_TARGETS = WEIBO_TARGET_PROFILES.map((item) => item.name);
