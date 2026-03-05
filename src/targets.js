@@ -26,7 +26,7 @@ const WEIBO_TARGET_NAMES = [
 
 export const WEIBO_TARGET_PROFILES = WEIBO_TARGET_NAMES.map((name) => ({
   name,
-  homepage: `https://weibo.com/n/${encodeURIComponent(name)}`
+  homepage: `https://s.weibo.com/user?q=${encodeURIComponent(name)}`
 }));
 
 export const X_TARGETS = X_TARGET_PROFILES.map((item) => item.handle);
