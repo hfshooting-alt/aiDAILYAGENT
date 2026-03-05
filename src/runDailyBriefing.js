@@ -406,12 +406,14 @@ function extractMblogsFromCards(cards) {
 }
 
 async function fetchWeiboProfileInfo(uid) {
+  const sessionCookie = await fetchWeiboSessionCookie(uid);
   const url = `https://m.weibo.cn/profile/info?uid=${encodeURIComponent(uid)}`;
   const response = await fetch(url, {
     headers: {
       'user-agent': 'Mozilla/5.0',
       referer: `https://m.weibo.cn/u/${uid}`,
-      accept: 'application/json,text/plain,*/*'
+      accept: 'application/json,text/plain,*/*',
+      ...(sessionCookie ? { cookie: sessionCookie } : {})
     }
   });
 
@@ -425,6 +427,42 @@ async function fetchWeiboProfileInfo(uid) {
   } catch {
     return null;
   }
+}
+
+function normalizeCookiePair(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.split(';')[0]?.trim() || '';
+}
+
+function collectSetCookies(response) {
+  if (!response?.headers) {
+    return [];
+  }
+
+  if (typeof response.headers.getSetCookie === 'function') {
+    return response.headers.getSetCookie().map(normalizeCookiePair).filter(Boolean);
+  }
+
+  const single = response.headers.get('set-cookie');
+  return single ? [normalizeCookiePair(single)] : [];
+}
+
+async function fetchWeiboSessionCookie(uid) {
+  const response = await fetch(`https://m.weibo.cn/u/${encodeURIComponent(uid)}`, {
+    headers: {
+      'user-agent': 'Mozilla/5.0',
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+    }
+  });
+
+  if (!response.ok) {
+    return '';
+  }
+
+  const cookies = collectSetCookies(response);
+  return cookies.join('; ');
 }
 
 async function resolveWeiboContainerIds(uid) {
@@ -460,6 +498,7 @@ async function fetchWeiboTimelineByUid(uid, fromDate, perUserLimit) {
   const seenPostIds = new Set();
   const results = [];
   const containerIds = await resolveWeiboContainerIds(uid);
+  const sessionCookie = await fetchWeiboSessionCookie(uid);
 
   for (const containerId of containerIds) {
     let sinceId = '';
@@ -482,7 +521,8 @@ async function fetchWeiboTimelineByUid(uid, fromDate, perUserLimit) {
           'user-agent': 'Mozilla/5.0',
           referer: `https://m.weibo.cn/u/${uid}`,
           accept: 'application/json,text/plain,*/*',
-          'x-requested-with': 'XMLHttpRequest'
+          'x-requested-with': 'XMLHttpRequest',
+          ...(sessionCookie ? { cookie: sessionCookie } : {})
         }
       });
 
