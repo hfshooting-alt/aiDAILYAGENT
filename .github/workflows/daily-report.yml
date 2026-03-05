@@ -1,0 +1,47 @@
+name: Daily AI Briefing
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # 10:00 Asia/Shanghai = 02:00 UTC
+  workflow_dispatch:
+
+jobs:
+  run-daily-briefing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run briefing
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          APIFY_X_ACTOR_ID: ${{ secrets.APIFY_X_ACTOR_ID }}
+          APIFY_WEIBO_ACTOR_ID: ${{ secrets.APIFY_WEIBO_ACTOR_ID }}
+          APIFY_LOOKBACK_DAYS: ${{ secrets.APIFY_LOOKBACK_DAYS }}
+          APIFY_FETCH_LIMIT: ${{ secrets.APIFY_FETCH_LIMIT }}
+          APIFY_X_MAX_ITEMS: ${{ secrets.APIFY_X_MAX_ITEMS }}
+          APIFY_WEIBO_MAX_ITEMS: ${{ secrets.APIFY_WEIBO_MAX_ITEMS }}
+          APIFY_RUN_MAX_WAIT_SECONDS: ${{ secrets.APIFY_RUN_MAX_WAIT_SECONDS }}
+          APIFY_RUN_POLL_SECONDS: ${{ secrets.APIFY_RUN_POLL_SECONDS }}
+          APIFY_X_INPUT_JSON: ${{ secrets.APIFY_X_INPUT_JSON }}
+          APIFY_WEIBO_INPUT_JSON: ${{ secrets.APIFY_WEIBO_INPUT_JSON }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          PROMPT_X_MAX_ITEMS: ${{ secrets.PROMPT_X_MAX_ITEMS }}
+          PROMPT_WEIBO_MAX_ITEMS: ${{ secrets.PROMPT_WEIBO_MAX_ITEMS }}
+        run: npm start
