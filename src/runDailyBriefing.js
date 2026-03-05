@@ -472,6 +472,42 @@ function extractMblogsFromCards(cards) {
   return out;
 }
 
+function extractMblogsFromDataPayload(data) {
+  const out = [];
+  const cards = Array.isArray(data?.data?.cards) ? data.data.cards : [];
+  out.push(...extractMblogsFromCards(cards));
+
+  const directCandidates = [
+    data?.data?.statuses,
+    data?.statuses,
+    data?.data?.list,
+    data?.list,
+    data?.data?.items,
+    data?.items
+  ];
+
+  for (const candidate of directCandidates) {
+    if (!Array.isArray(candidate)) {
+      continue;
+    }
+    for (const item of candidate) {
+      if (item && typeof item === 'object') {
+        out.push(item?.mblog && typeof item.mblog === 'object' ? item.mblog : item);
+      }
+    }
+  }
+
+  const dedup = new Map();
+  for (const item of out) {
+    const key = String(item?.id || item?.idstr || item?.mid || Math.random());
+    if (!dedup.has(key)) {
+      dedup.set(key, item);
+    }
+  }
+
+  return [...dedup.values()];
+}
+
 async function fetchWeiboProfileInfo(uid) {
   const requestHeaders = await buildWeiboRequestHeaders(uid);
   const url = `https://m.weibo.cn/profile/info?uid=${encodeURIComponent(uid)}`;
@@ -624,10 +660,16 @@ async function fetchWeiboTimelineByUid(uid, fromDate, perUserLimit) {
         continue;
       }
 
-      const cards = Array.isArray(data?.data?.cards) ? data.data.cards : [];
-      const mblogs = extractMblogsFromCards(cards);
+      const mblogs = extractMblogsFromDataPayload(data);
       if (mblogs.length === 0) {
         if (!sinceId) {
+          console.log('Weibo container returned no extractable posts', {
+            uid,
+            containerId: containerId || 'none',
+            page,
+            hasCards: Array.isArray(data?.data?.cards),
+            hasStatuses: Array.isArray(data?.data?.statuses) || Array.isArray(data?.statuses)
+          });
           continue;
         }
         break;
