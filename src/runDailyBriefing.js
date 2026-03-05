@@ -68,6 +68,39 @@ function buildHardTimeFields(fromDate) {
   };
 }
 
+function isRunTerminalStatus(status) {
+  return ['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT'].includes(status);
+}
+
+async function waitForRunToFinish(runId) {
+  const maxWaitSeconds = parsePositiveInt(process.env.APIFY_RUN_MAX_WAIT_SECONDS, 240);
+  const pollSeconds = parsePositiveInt(process.env.APIFY_RUN_POLL_SECONDS, 20);
+  const startedAt = Date.now();
+
+  while (true) {
+    const elapsedMs = Date.now() - startedAt;
+    if (elapsedMs >= maxWaitSeconds * 1000) {
+      const abortUrl = buildApifyUrl(`/v2/actor-runs/${encodeURIComponent(runId)}/abort`, { gracefully: false });
+      await fetchJson(abortUrl, { method: 'POST' });
+      throw new Error(`Actor run ${runId} exceeded ${maxWaitSeconds}s and was aborted to control cost.`);
+    }
+
+    const remainingSeconds = Math.max(1, Math.ceil((maxWaitSeconds * 1000 - elapsedMs) / 1000));
+    const waitForFinish = Math.min(pollSeconds, remainingSeconds);
+
+    const runUrl = buildApifyUrl(`/v2/actor-runs/${encodeURIComponent(runId)}`, { waitForFinish });
+    const runResponse = await fetchJson(runUrl);
+    const runData = runResponse?.data;
+
+    if (runData?.status && isRunTerminalStatus(runData.status)) {
+      if (runData.status !== 'SUCCEEDED') {
+        throw new Error(`Actor run ${runId} finished with status ${runData.status}.`);
+      }
+      return runData;
+    }
+  }
+}
+
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) {
@@ -144,16 +177,20 @@ async function resolveActorId(platform) {
 }
 
 async function runActorAndFetchItems({ actorId, input }) {
-  const runUrl = buildApifyUrl(`/v2/acts/${encodeURIComponent(actorId)}/runs`, {
-    waitForFinish: 180
-  });
+  const runUrl = buildApifyUrl(`/v2/acts/${encodeURIComponent(actorId)}/runs`);
 
-  const runResponse = await fetchJson(runUrl, {
+  const runStart = await fetchJson(runUrl, {
     method: 'POST',
     body: JSON.stringify(input)
   });
 
-  const datasetId = runResponse?.data?.defaultDatasetId;
+  const runId = runStart?.data?.id;
+  if (!runId) {
+    throw new Error(`Actor ${actorId} run started without run id.`);
+  }
+
+  const runData = await waitForRunToFinish(runId);
+  const datasetId = runData?.defaultDatasetId;
   if (!datasetId) {
     throw new Error(`Actor ${actorId} run finished without dataset.`);
   }
