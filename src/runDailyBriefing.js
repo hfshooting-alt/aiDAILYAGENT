@@ -318,7 +318,14 @@ async function fetchWeiboStatusMeta(postId) {
     return null;
   }
 
-  const data = await response.json();
+  const rawBody = await response.text();
+  let data;
+  try {
+    data = JSON.parse(rawBody);
+  } catch {
+    return null;
+  }
+
   const user = data?.data?.user || data?.user;
   const status = data?.data || data;
 
@@ -365,7 +372,14 @@ async function fetchWeiboTimelineByUid(uid, fromDate, perUserLimit) {
     return [];
   }
 
-  const data = await response.json();
+  const rawBody = await response.text();
+  let data;
+  try {
+    data = JSON.parse(rawBody);
+  } catch {
+    return [];
+  }
+
   const cards = Array.isArray(data?.data?.cards) ? data.data.cards : [];
 
   const posts = cards
