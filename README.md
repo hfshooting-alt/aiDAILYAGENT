@@ -50,7 +50,7 @@ npm start
 
 ## 关键提醒
 
-当前 `buildPlatformInput` 是通用占位字段。你把 X/微博 actor 的 input JSON 发我后，我可以改成你的专用 schema，数据质量会明显更高。
+当前微博已切换为“按目标 UID 直抓 m.weibo.cn 时间线”模式，不再依赖 Weibo Actor。X 仍支持 `APIFY_X_INPUT_JSON` 精细控制。
 
 
 ## OpenAI 限流（TPM）报错时的快速处理
@@ -116,7 +116,6 @@ npm start
 并且可传 actor 原生参数覆盖（高级）：
 
 - `APIFY_X_INPUT_JSON`
-- `APIFY_WEIBO_INPUT_JSON`
 
 例如（示例，按你的 actor schema 调整）：
 
@@ -135,13 +134,7 @@ npm start
 5. 将数量上限字段设低（如 `maxItems=40~80`）
 6. 点击 `Save as default input`
 
-微博 actor 同样重复 1~6 步：
-
-- 只保留你指定的 10 个微博博主
-- 时间范围最近2天
-- 数量上限 40~80
-
-运行后看日志中的过滤统计：
+微博侧不再依赖 Actor 输入，改为按目标 UID 抓取最近时间线。运行后看日志中的过滤统计：
 
 - `xBefore/xAfter`
 - `weiboBefore/weiboAfter`

@@ -5,7 +5,6 @@ import { X_TARGETS, WEIBO_TARGETS, X_TARGET_PROFILES, WEIBO_TARGET_PROFILES } fr
 import { buildDailyPrompt } from './prompt.js';
 
 const X_ACTOR_KEYWORDS = ['twitter', 'x.com', 'x ', 'tweet'];
-const WEIBO_ACTOR_KEYWORDS = ['weibo', '微博'];
 
 function normalizeIdentity(value) {
   if (typeof value !== 'string') {
@@ -202,17 +201,17 @@ function pickActorFromActs(acts, keywords) {
   });
 }
 
-async function resolveActorId(platform) {
-  const manualId = process.env[`APIFY_${platform}_ACTOR_ID`];
+async function resolveXActorId() {
+  const manualId = process.env.APIFY_X_ACTOR_ID;
   if (manualId) {
     return manualId;
   }
 
   const acts = await listUsedActors(1000);
-  const actor = platform === 'X' ? pickActorFromActs(acts, X_ACTOR_KEYWORDS) : pickActorFromActs(acts, WEIBO_ACTOR_KEYWORDS);
+  const actor = pickActorFromActs(acts, X_ACTOR_KEYWORDS);
 
   if (!actor?.id) {
-    throw new Error(`Cannot auto-resolve APIFY_${platform}_ACTOR_ID. Please set it in env.`);
+    throw new Error('Cannot auto-resolve APIFY_X_ACTOR_ID. Please set it in env.');
   }
 
   return actor.id;
@@ -526,30 +525,18 @@ function balanceItemsAcrossTargets(items, profiles, maxItems) {
   return result;
 }
 
-function buildPlatformInput({ platform, fromDate }) {
-  const hardMaxItems = resolveHardMaxItems(platform);
-  const hardLimits = buildHardLimitFields(platform, hardMaxItems);
+function buildXInput({ fromDate }) {
+  const hardMaxItems = resolveHardMaxItems('X');
+  const hardLimits = buildHardLimitFields('X', hardMaxItems);
   const hardTime = buildHardTimeFields(fromDate);
 
-  if (platform === 'X') {
-    return {
-      handles: X_TARGETS,
-      includeReplies: false,
-      includeRetweets: false,
-      includeLikes: false,
-      ...hardTime,
-      ...parseJsonEnv('APIFY_X_INPUT_JSON'),
-      ...hardLimits,
-      ...hardTime
-    };
-  }
-
   return {
-    keywordsOrUsers: WEIBO_TARGETS,
-    includeComments: false,
-    includeReposts: false,
+    handles: X_TARGETS,
+    includeReplies: false,
+    includeRetweets: false,
+    includeLikes: false,
     ...hardTime,
-    ...parseJsonEnv('APIFY_WEIBO_INPUT_JSON'),
+    ...parseJsonEnv('APIFY_X_INPUT_JSON'),
     ...hardLimits,
     ...hardTime
   };
@@ -558,28 +545,16 @@ function buildPlatformInput({ platform, fromDate }) {
 async function collectDailySignals() {
   const lookbackDays = parsePositiveInt(process.env.APIFY_LOOKBACK_DAYS, 2);
   const fromDate = dayjs().subtract(lookbackDays, 'day').startOf('day').toISOString();
-  const xActorId = await resolveActorId('X');
-  const weiboActorId = await resolveActorId('WEIBO');
+  const xActorId = await resolveXActorId();
 
-  const [xItemsRaw, weiboActorItemsRaw] = await Promise.all([
-    runActorAndFetchItems({
-      actorId: xActorId,
-      input: buildPlatformInput({ platform: 'X', fromDate }),
-      platform: 'X'
-    }),
-    runActorAndFetchItems({
-      actorId: weiboActorId,
-      input: buildPlatformInput({ platform: 'WEIBO', fromDate }),
-      platform: 'WEIBO'
-    })
-  ]);
+  const xItemsRaw = await runActorAndFetchItems({
+    actorId: xActorId,
+    input: buildXInput({ fromDate }),
+    platform: 'X'
+  });
 
-  let weiboSource = 'actor';
-  let weiboItemsRaw = weiboActorItemsRaw;
-  if (!Array.isArray(weiboItemsRaw) || weiboItemsRaw.length === 0) {
-    weiboSource = 'fallback_uid_timeline';
-    weiboItemsRaw = await fetchWeiboFallbackItems({ fromDate, maxItems: resolveHardMaxItems('WEIBO') });
-  }
+  const weiboSource = 'uid_timeline';
+  const weiboItemsRaw = await fetchWeiboFallbackItems({ fromDate, maxItems: resolveHardMaxItems('WEIBO') });
 
   const xWithTargets = attachTargetForPlatform(xItemsRaw, X_PROFILE_BY_IDENTITY);
   const filteredXItems = filterItemsByAttachedTarget(xWithTargets);
@@ -604,7 +579,7 @@ async function collectDailySignals() {
     weiboPerTarget: Object.fromEntries(WEIBO_TARGET_PROFILES.map((p) => [p.name, balancedWeiboItems.filter((i) => i?._targetProfile?.name === p.name).length]))
   });
 
-  return { xItems: balancedXItems, weiboItems: balancedWeiboItems, xActorId, weiboActorId };
+  return { xItems: balancedXItems, weiboItems: balancedWeiboItems, xActorId, weiboActorId: 'uid_timeline' };
 }
 
 function truncateString(value, maxLength = 600) {

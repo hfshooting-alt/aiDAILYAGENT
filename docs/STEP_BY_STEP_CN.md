@@ -31,7 +31,6 @@
 
 - `APIFY_TOKEN`
 - `APIFY_X_ACTOR_ID`（建议）
-- `APIFY_WEIBO_ACTOR_ID`（建议）
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `SMTP_HOST`
@@ -97,7 +96,7 @@
 如需更细粒度，新增（可选）：
 
 - `APIFY_X_INPUT_JSON`
-- `APIFY_WEIBO_INPUT_JSON`
+- `WEIBO_TARGET_UIDS_JSON`（可选，手动覆盖 UID 映射）
 
 示例值（按你的 actor schema 调整）：
 
