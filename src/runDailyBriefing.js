@@ -405,6 +405,53 @@ function extractMblogsFromCards(cards) {
   return out;
 }
 
+async function fetchWeiboProfileInfo(uid) {
+  const url = `https://m.weibo.cn/profile/info?uid=${encodeURIComponent(uid)}`;
+  const response = await fetch(url, {
+    headers: {
+      'user-agent': 'Mozilla/5.0',
+      referer: `https://m.weibo.cn/u/${uid}`,
+      accept: 'application/json,text/plain,*/*'
+    }
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const rawBody = await response.text();
+  try {
+    return JSON.parse(rawBody);
+  } catch {
+    return null;
+  }
+}
+
+async function resolveWeiboContainerIds(uid) {
+  const ids = [
+    `107603${uid}`,
+    `100505${uid}`,
+    `230413${uid}_-_WEIBO_SECOND_PROFILE_WEIBO`,
+    `100505${uid}_-_WEIBO_SECOND_PROFILE_WEIBO`
+  ];
+  const profileInfo = await fetchWeiboProfileInfo(uid);
+  const tabs = Array.isArray(profileInfo?.data?.tabsInfo?.tabs) ? profileInfo.data.tabsInfo.tabs : [];
+
+  for (const tab of tabs) {
+    const containerid = tab?.containerid;
+    const tabType = String(tab?.tab_type || '').toLowerCase();
+    const type = String(tab?.type || '').toLowerCase();
+    if (typeof containerid !== 'string' || !containerid) {
+      continue;
+    }
+    if (tabType.includes('weibo') || type.includes('weibo') || containerid.startsWith('107603')) {
+      ids.push(containerid);
+    }
+  }
+
+  return [...new Set(ids)];
+}
+
 async function fetchWeiboTimelineByUid(uid, fromDate, perUserLimit) {
   if (!uid) {
     return [];
@@ -412,62 +459,96 @@ async function fetchWeiboTimelineByUid(uid, fromDate, perUserLimit) {
 
   const seenPostIds = new Set();
   const results = [];
+  const containerIds = await resolveWeiboContainerIds(uid);
 
-  for (let page = 1; page <= 5 && results.length < perUserLimit; page += 1) {
-    const url = `https://m.weibo.cn/api/container/getIndex?type=uid&value=${encodeURIComponent(uid)}&containerid=107603${encodeURIComponent(uid)}&page=${page}`;
-    const response = await fetch(url, {
-      headers: {
-        'user-agent': 'Mozilla/5.0',
-        referer: `https://m.weibo.cn/u/${uid}`,
-        accept: 'application/json,text/plain,*/*'
-      }
-    });
+  for (const containerId of containerIds) {
+    let sinceId = '';
 
-    if (!response.ok) {
-      break;
-    }
-
-    const rawBody = await response.text();
-    let data;
-    try {
-      data = JSON.parse(rawBody);
-    } catch {
-      break;
-    }
-
-    const cards = Array.isArray(data?.data?.cards) ? data.data.cards : [];
-    const mblogs = extractMblogsFromCards(cards);
-    if (mblogs.length === 0) {
-      continue;
-    }
-
-    for (const mblog of mblogs) {
-      if (!isRecentEnough(mblog?.created_at, fromDate)) {
-        continue;
+    for (let page = 1; page <= 5 && results.length < perUserLimit; page += 1) {
+      const params = new URLSearchParams({
+        type: 'uid',
+        value: String(uid),
+        containerid: containerId
+      });
+      if (sinceId) {
+        params.set('since_id', sinceId);
+      } else {
+        params.set('page', String(page));
       }
 
-      const postId = String(mblog?.id || mblog?.idstr || '');
-      if (!postId || seenPostIds.has(postId)) {
-        continue;
-      }
-
-      seenPostIds.add(postId);
-      results.push({
-        postId,
-        postUrl: `https://m.weibo.cn/status/${postId}`,
-        text: mblog?.raw_text || mblog?.text,
-        createdAt: mblog?.created_at,
-        userId: mblog?.user?.id ? String(mblog.user.id) : uid,
-        screenName: mblog?.user?.screen_name,
-        authorName: mblog?.user?.screen_name,
-        authorUrl: uid ? `https://m.weibo.cn/u/${uid}` : undefined,
-        profileUrl: uid ? `https://m.weibo.cn/u/${uid}` : undefined
+      const url = `https://m.weibo.cn/api/container/getIndex?${params.toString()}`;
+      const response = await fetch(url, {
+        headers: {
+          'user-agent': 'Mozilla/5.0',
+          referer: `https://m.weibo.cn/u/${uid}`,
+          accept: 'application/json,text/plain,*/*',
+          'x-requested-with': 'XMLHttpRequest'
+        }
       });
 
-      if (results.length >= perUserLimit) {
+      if (!response.ok) {
+        continue;
+      }
+
+      const rawBody = await response.text();
+      let data;
+      try {
+        data = JSON.parse(rawBody);
+      } catch {
+        continue;
+      }
+
+      if (data?.ok !== undefined && Number(data.ok) <= 0) {
+        continue;
+      }
+
+      const cards = Array.isArray(data?.data?.cards) ? data.data.cards : [];
+      const mblogs = extractMblogsFromCards(cards);
+      if (mblogs.length === 0) {
+        if (!sinceId) {
+          continue;
+        }
         break;
       }
+
+      for (const mblog of mblogs) {
+        if (!isRecentEnough(mblog?.created_at, fromDate)) {
+          continue;
+        }
+
+        const postId = String(mblog?.id || mblog?.idstr || '');
+        if (!postId || seenPostIds.has(postId)) {
+          continue;
+        }
+
+        seenPostIds.add(postId);
+        results.push({
+          postId,
+          postUrl: `https://m.weibo.cn/status/${postId}`,
+          text: mblog?.raw_text || mblog?.text,
+          createdAt: mblog?.created_at,
+          userId: mblog?.user?.id ? String(mblog.user.id) : uid,
+          screenName: mblog?.user?.screen_name,
+          authorName: mblog?.user?.screen_name,
+          authorUrl: uid ? `https://m.weibo.cn/u/${uid}` : undefined,
+          profileUrl: uid ? `https://m.weibo.cn/u/${uid}` : undefined
+        });
+
+        if (results.length >= perUserLimit) {
+          break;
+        }
+      }
+
+      const nextSinceId = data?.data?.cardlistInfo?.since_id;
+      if (!nextSinceId || String(nextSinceId) === String(sinceId || '')) {
+        break;
+      }
+      sinceId = String(nextSinceId);
     }
+  }
+
+  if (results.length === 0) {
+    console.log('Weibo UID empty across containers', { uid, containerIds });
   }
 
   return results;
@@ -480,6 +561,7 @@ async function fetchWeiboFallbackItems({ fromDate, maxItems }) {
   for (const profile of WEIBO_TARGET_PROFILES) {
     const uid = getWeiboUidForProfile(profile);
     const posts = await fetchWeiboTimelineByUid(uid, fromDate, perUserLimit);
+    console.log('Weibo UID fetch result', { target: profile.name, uid: uid || null, count: posts.length });
     for (const post of posts) {
       all.push(post);
       if (all.length >= maxItems) {
