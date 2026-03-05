@@ -1,8 +1,13 @@
 import dayjs from 'dayjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { readFile } from 'node:fs/promises';
 import OpenAI from 'openai';
 import nodemailer from 'nodemailer';
 import { X_TARGETS, WEIBO_TARGETS, X_TARGET_PROFILES, WEIBO_TARGET_PROFILES } from './targets.js';
 import { buildDailyPrompt } from './prompt.js';
+
+const execFileAsync = promisify(execFile);
 
 const X_ACTOR_KEYWORDS = ['twitter', 'x.com', 'x ', 'tweet'];
 
@@ -731,6 +736,12 @@ async function fetchWeiboTimelineByUid(uid, fromDate, perUserLimit) {
 }
 
 async function fetchWeiboFallbackItems({ fromDate, maxItems }) {
+  const externalItems = await fetchWeiboItemsFromExternalSpider({ fromDate, maxItems });
+  if (externalItems.length > 0) {
+    console.log('Using external Weibo spider output', { count: externalItems.length });
+    return externalItems;
+  }
+
   const perUserLimit = parsePositiveInt(process.env.WEIBO_FALLBACK_PER_USER, 3);
   const all = [];
 
@@ -747,6 +758,80 @@ async function fetchWeiboFallbackItems({ fromDate, maxItems }) {
   }
 
   return all;
+}
+
+function parseDateInput(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return null;
+  }
+  const parsed = dayjs(text);
+  return parsed.isValid() ? parsed.toISOString() : text;
+}
+
+function normalizeExternalWeiboItem(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const userId = String(raw.userId || raw.uid || raw.user_id || raw.authorId || '').trim();
+  const postId = String(raw.postId || raw.id || raw.mid || raw.idstr || '').trim();
+  const text = raw.text || raw.content || raw.raw_text;
+  const createdAt = parseDateInput(raw.createdAt || raw.created_at || raw.time || raw.publish_time);
+
+  if (!userId && !postId && !text) {
+    return null;
+  }
+
+  return {
+    postId,
+    postUrl: raw.postUrl || raw.url || (postId ? `https://m.weibo.cn/status/${postId}` : undefined),
+    text,
+    createdAt,
+    userId: userId || undefined,
+    screenName: raw.screenName || raw.username || raw.userName || raw.name,
+    authorName: raw.authorName || raw.screenName || raw.username || raw.userName || raw.name,
+    authorUrl: raw.authorUrl || raw.profileUrl || (userId ? `https://m.weibo.cn/u/${userId}` : undefined),
+    profileUrl: raw.profileUrl || raw.authorUrl || (userId ? `https://m.weibo.cn/u/${userId}` : undefined)
+  };
+}
+
+async function fetchWeiboItemsFromExternalSpider({ fromDate, maxItems }) {
+  if (process.env.WEIBO_EXTERNAL_SPIDER_ENABLED !== 'true') {
+    return [];
+  }
+
+  const command = process.env.WEIBO_EXTERNAL_SPIDER_CMD?.trim();
+  const outputPath = process.env.WEIBO_EXTERNAL_SPIDER_OUTPUT?.trim();
+  if (!command || !outputPath) {
+    console.warn('WEIBO_EXTERNAL_SPIDER_ENABLED=true but command/output is missing.');
+    return [];
+  }
+
+  const args = command.split(' ').filter(Boolean);
+  const [bin, ...rest] = args;
+  if (!bin) {
+    return [];
+  }
+
+  try {
+    const timeoutMs = parsePositiveInt(process.env.WEIBO_EXTERNAL_SPIDER_TIMEOUT_MS, 180000);
+    await execFileAsync(bin, rest, { timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024 });
+  } catch (error) {
+    console.warn('External Weibo spider command failed, fallback to uid timeline.', error?.message || error);
+    return [];
+  }
+
+  try {
+    const raw = await readFile(outputPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const arr = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.items) ? parsed.items : [];
+    const normalized = arr.map(normalizeExternalWeiboItem).filter(Boolean);
+    return normalized.filter((item) => isRecentEnough(item.createdAt, fromDate)).slice(0, maxItems);
+  } catch (error) {
+    console.warn('Failed to parse external Weibo spider output, fallback to uid timeline.', error?.message || error);
+    return [];
+  }
 }
 
 async function enrichWeiboItems(items) {

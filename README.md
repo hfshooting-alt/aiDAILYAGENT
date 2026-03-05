@@ -52,6 +52,14 @@ npm start
 
 当前微博已切换为“按目标 UID 直抓 m.weibo.cn 时间线”模式，不再依赖 Weibo Actor。X 仍支持 `APIFY_X_INPUT_JSON` 精细控制。
 
+如你的仓库已包含 `weiboSpider-master`，可启用“外部爬虫优先”模式：
+
+- `WEIBO_EXTERNAL_SPIDER_ENABLED=true`
+- `WEIBO_EXTERNAL_SPIDER_CMD`：执行爬虫并导出 JSON 的命令
+- `WEIBO_EXTERNAL_SPIDER_OUTPUT`：导出的 JSON 文件路径
+
+当外部爬虫有输出时，Agent 将优先使用该输出；失败时自动回退到当前 UID 时间线方案。
+
 
 ## OpenAI 限流（TPM）报错时的快速处理
 
