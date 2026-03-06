@@ -41,10 +41,15 @@ npm start
 
 ## 成本控制建议
 
-- `APIFY_LOOKBACK_DAYS=2`
+- `APIFY_LOOKBACK_DAYS=1`
 - `APIFY_FETCH_LIMIT=80`
 - `PROMPT_X_MAX_ITEMS=20`
 - `APIFY_X_INPUT_JSON={"maxItems":40,"sort":"latest"}`（按你的 actor schema 调整）
+
+如果你发现日志里出现 `likelyCapped: true`，说明 24h 内抓到的数据已经触顶当前 limit，建议上调：
+
+- `APIFY_X_MAX_ITEMS`
+- 或 `APIFY_FETCH_LIMIT`
 
 ## 每天 10:00 自动发送
 

@@ -6,7 +6,7 @@
 
 - `APIFY_TOKEN`
 - `APIFY_X_ACTOR_ID`
-- `APIFY_LOOKBACK_DAYS`
+- `APIFY_LOOKBACK_DAYS`（建议 1，表示近24h）
 - `APIFY_FETCH_LIMIT`
 - `APIFY_X_MAX_ITEMS`
 - `APIFY_RUN_MAX_WAIT_SECONDS`
@@ -39,6 +39,11 @@
 
 - 异步：`https://你的域名/api/daily-report`
 - 同步排错：`https://你的域名/api/daily-report?sync=true`
+
+如果日志里看到 `likelyCapped: true`，说明近24h数据量超过当前上限，请增大：
+
+- `APIFY_X_MAX_ITEMS`
+- 或 `APIFY_FETCH_LIMIT`
 
 ## 4) 自动定时
 

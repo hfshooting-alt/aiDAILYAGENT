@@ -302,8 +302,8 @@ function buildXInput({ fromDate }) {
   return {
     handles: X_TARGETS,
     includeReplies: false,
-    includeRetweets: false,
-    includeLikes: false,
+    includeRetweets: true,
+    includeLikes: true,
     ...hardTime,
     ...parseJsonEnv('APIFY_X_INPUT_JSON'),
     ...hardLimits,
@@ -312,7 +312,7 @@ function buildXInput({ fromDate }) {
 }
 
 async function collectDailySignals() {
-  const lookbackDays = parsePositiveInt(process.env.APIFY_LOOKBACK_DAYS, 2);
+  const lookbackDays = parsePositiveInt(process.env.APIFY_LOOKBACK_DAYS, 1);
   const fromDate = dayjs().subtract(lookbackDays, 'day').startOf('day').toISOString();
   const xActorId = await resolveXActorId();
 
@@ -323,13 +323,24 @@ async function collectDailySignals() {
 
   const xWithTargets = attachTargetForX(xItemsRaw);
   const filteredXItems = filterItemsByAttachedTarget(xWithTargets);
-  const balancedXItems = balanceItemsAcrossTargets(filteredXItems, X_TARGET_PROFILES, resolveHardMaxItems());
+  const hardMaxItems = resolveHardMaxItems();
+  const balancedXItems = balanceItemsAcrossTargets(filteredXItems, X_TARGET_PROFILES, hardMaxItems);
+  const likelyCapped = xItemsRaw.length >= hardMaxItems;
+
+  if (likelyCapped) {
+    console.warn('X fetch likely hit limit cap; consider increasing APIFY_X_MAX_ITEMS/APIFY_FETCH_LIMIT for complete 24h signals.', {
+      xBefore: xItemsRaw.length,
+      hardMaxItems
+    });
+  }
 
   console.log('Signal filtering summary', {
     strictFilter: true,
     xBefore: xItemsRaw.length,
     xAfterMatch: filteredXItems.length,
     xAfterBalanced: balancedXItems.length,
+    likelyCapped,
+    hardMaxItems,
     xPerTarget: Object.fromEntries(X_TARGET_PROFILES.map((p) => [p.name, balancedXItems.filter((i) => i?._targetProfile?.name === p.name).length]))
   });
 
