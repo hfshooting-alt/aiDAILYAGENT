@@ -527,14 +527,6 @@ function linkifyLine(line) {
   });
 }
 
-function linkifyNamedSources(text) {
-  const input = String(text || '');
-  return input.replace(/([^（\(\s|:：]+)（(https?:\/\/[^）\s]+)）/g, (_m, label, url) => {
-    const href = encodeURI(url);
-    return `<a href="${href}" style="color:#1d4ed8;text-decoration:underline;font-weight:600;">${escapeHtml(label)}</a>`;
-  });
-}
-
 function formatDisplayLine(line, { inLandscapeSection = false } = {}) {
   const normalized = String(line).trim();
 
@@ -545,14 +537,11 @@ function formatDisplayLine(line, { inLandscapeSection = false } = {}) {
       .split('；')
       .map((part) => part.trim())
       .filter(Boolean)
-      .map((part) => {
-        const linkedPart = linkifyNamedSources(escapeHtml(part));
-        return `- ${linkedPart}`;
-      })
+      .map((part) => `- ${part}`)
       .join('<br/>');
 
-    const first = head.trim() ? `${linkifyNamedSources(escapeHtml(head.trim()))}<br/>` : '';
-    return `${first}<span style="font-weight:700;color:#0f172a;">证据：</span><br/>${evidenceLines}`;
+    const first = head.trim() ? `${head.trim()}<br/>` : '';
+    return `${first}<span style="font-weight:700;color:#0f172a;">证据：</span><br/>${linkifyLine(escapeHtml(evidenceLines))}`;
   }
 
   // 对博主动态行：把同一行里的多条帖子强制拆行
