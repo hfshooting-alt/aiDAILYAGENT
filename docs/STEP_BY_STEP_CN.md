@@ -1,36 +1,17 @@
-# 手把手教程（GitHub + Vercel 全流程，零基础版）
+# 手把手教程（仅 X 版本）
 
-这份文档默认你是第一次做部署。
-目标：**每天早上 10:00 自动收到 AI 日报邮件**。
+## 1) 你现在只需要配置这些变量
 
----
-
-## A. 你会在 3 个页面操作
-
-1. **GitHub 仓库页面**（放代码、看提交）
-2. **Vercel 项目页面**（配置环境变量、看日志）
-3. **邮箱后台**（拿 SMTP 授权码）
-
----
-
-## B. 一次性准备
-
-你需要准备：
-
-- GitHub 账号
-- Vercel 账号（已绑定 GitHub）
-- Apify token
-- OpenAI API key
-- SMTP 邮箱账号
-
----
-
-## C. Vercel 配置环境变量
-
-进入：`Settings -> Environment Variables`，新增：
+在 GitHub Actions Secrets（或 Vercel Environment Variables）中填写：
 
 - `APIFY_TOKEN`
-- `APIFY_X_ACTOR_ID`（建议）
+- `APIFY_X_ACTOR_ID`
+- `APIFY_LOOKBACK_DAYS`
+- `APIFY_FETCH_LIMIT`
+- `APIFY_X_MAX_ITEMS`
+- `APIFY_RUN_MAX_WAIT_SECONDS`
+- `APIFY_RUN_POLL_SECONDS`
+- `APIFY_X_INPUT_JSON`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `SMTP_HOST`
@@ -40,80 +21,25 @@
 - `SMTP_PASS`
 - `EMAIL_FROM`
 - `EMAIL_TO`
+- `PROMPT_X_MAX_ITEMS`
 
-保存后到 `Deployments` 点击 `Redeploy`。
+## 2) 你应该删除的微博变量（如果之前配过）
 
----
+- `APIFY_WEIBO_ACTOR_ID`
+- `APIFY_WEIBO_MAX_ITEMS`
+- `WEIBO_TARGET_UIDS_JSON`
+- `WEIBO_FALLBACK_PER_USER`
+- `WEIBO_EXTERNAL_SPIDER_ENABLED`
+- `WEIBO_EXTERNAL_SPIDER_CMD`
+- `WEIBO_EXTERNAL_SPIDER_OUTPUT`
+- `WEIBO_EXTERNAL_SPIDER_TIMEOUT_MS`
+- `PROMPT_WEIBO_MAX_ITEMS`
 
-## D. 新的测试方式（已改为“快速返回 + 后台异步”）
+## 3) 手动测试
 
-### D1) 线上真实模式（推荐）
+- 异步：`https://你的域名/api/daily-report`
+- 同步排错：`https://你的域名/api/daily-report?sync=true`
 
-打开：
+## 4) 自动定时
 
-- `https://你的域名/api/daily-report`
-
-你会快速得到响应（`202`, `mode: async`），表示任务已进入后台。
-
-### D2) 同步调试模式（只用于排错）
-
-打开：
-
-- `https://你的域名/api/daily-report?sync=true`
-
-这个模式会等任务跑完才返回，可能需要较长时间。
-
----
-
-## E. 如何判断是否真的发出日报
-
-因为默认是后台异步，是否成功请看：
-
-1. Vercel 项目 -> `Logs`
-2. 查找：
-   - `Async daily briefing finished successfully.`（成功）
-   - `Async daily briefing failed.`（失败）
-
-同时检查 `EMAIL_TO` 邮箱是否收到日报。
-
----
-
-## F. 自动每天 10:00 发送
-
-`vercel.json` 已配置每天北京时间 10:00 触发。
-
-
-
-## G. 把抓取范围牢牢限制在 20 人 + 最近两天（省钱关键）
-
-在 GitHub Actions Secrets（或 Vercel 环境变量）新增：
-
-- `APIFY_LOOKBACK_DAYS=2`
-- `APIFY_FETCH_LIMIT=80`
-- `PROMPT_X_MAX_ITEMS=20`
-- `PROMPT_WEIBO_MAX_ITEMS=20`
-
-如果你仓库里已经有 `weiboSpider-master`，还可开启外部微博爬虫优先：
-
-- `WEIBO_EXTERNAL_SPIDER_ENABLED=true`
-- `WEIBO_EXTERNAL_SPIDER_CMD=你的导出命令`
-- `WEIBO_EXTERNAL_SPIDER_OUTPUT=导出的JSON路径`
-- `WEIBO_EXTERNAL_SPIDER_TIMEOUT_MS=180000`
-
-如需更细粒度，新增（可选）：
-
-- `APIFY_X_INPUT_JSON`
-- `WEIBO_TARGET_UIDS_JSON`（可选，手动覆盖 UID 映射）
-
-示例值（按你的 actor schema 调整）：
-
-`{"maxItems":40,"sort":"latest"}`
-
-然后去 Apify actor 页面确认：
-
-1. Input 只留目标账号（不要泛关键词）
-2. 时间范围设最近 2 天
-3. maxItems 设 40~80
-4. 保存为默认输入
-
-最后再触发一次 workflow，观察日志里的 `xBefore/xAfter` 和 `weiboBefore/weiboAfter`。
+- GitHub Actions / Vercel 均已是 UTC `0 2 * * *`（北京时间 10:00）。

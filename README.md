@@ -1,45 +1,22 @@
 # AI Daily Agent
 
-你的目标：每天上午 10:00 自动收到 20 位 AI 人物的日报邮件。
+你的目标：每天上午 10:00 自动收到 **X（Twitter）博主** 的 AI 日报邮件。
+
+> 当前版本已完全移除微博抓取链路，仅保留 X 数据源。
 
 ## 最简逻辑链路（Vercel）
 
 1. Vercel Cron 定时触发 `/api/daily-report`
-2. 接口**立即返回 202**（快速返回）
-3. 后台异步执行：Apify 抓取 -> OpenAI 总结 -> SMTP 发信
-4. 到 Vercel Logs 查看成功/失败
+2. 接口立即返回 `202`
+3. 后台执行：Apify(X) 抓取 -> OpenAI 总结 -> SMTP 发信
+4. 在 Logs 查看结果
 
-已内置关键文件：
+## 手动测试
 
-- `api/daily-report.js`：Vercel Serverless 入口（默认异步）
-- `src/runDailyBriefing.js`：抓取 + 总结 + 发信主流程
-- `vercel.json`：每天 10:00（北京时间）定时
+- 异步模式：`https://你的域名/api/daily-report`
+- 同步排错：`https://你的域名/api/daily-report?sync=true`
 
-## 如何手动测试
-
-### 推荐（与线上一致）
-
-打开：
-
-- `https://你的域名/api/daily-report`
-
-你会立刻看到 `202` + `mode: async`，表示任务已进入后台。
-
-### 调试模式（同步等待）
-
-打开：
-
-- `https://你的域名/api/daily-report?sync=true`
-
-这个模式会等待任务执行完成，再返回结果（可能较慢）。
-
-## 你现在该做什么
-
-请直接打开这份超详细教程：
-
-- `docs/STEP_BY_STEP_CN.md`
-
-## 本地调试（可选）
+## 本地调试
 
 ```bash
 npm install
@@ -48,103 +25,47 @@ npm run list:actors
 npm start
 ```
 
-## 关键提醒
+## 必要环境变量
 
-当前微博已切换为“按目标 UID 直抓 m.weibo.cn 时间线”模式，不再依赖 Weibo Actor。X 仍支持 `APIFY_X_INPUT_JSON` 精细控制。
+- `APIFY_TOKEN`
+- `APIFY_X_ACTOR_ID`（建议固定）
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_SECURE`
+- `SMTP_USER`
+- `SMTP_PASS`
+- `EMAIL_FROM`
+- `EMAIL_TO`
 
-如你的仓库已包含 `weiboSpider-master`，可启用“外部爬虫优先”模式：
+## 成本控制建议
 
-- `WEIBO_EXTERNAL_SPIDER_ENABLED=true`
-- `WEIBO_EXTERNAL_SPIDER_CMD`：执行爬虫并导出 JSON 的命令
-- `WEIBO_EXTERNAL_SPIDER_OUTPUT`：导出的 JSON 文件路径
-
-当外部爬虫有输出时，Agent 将优先使用该输出；失败时自动回退到当前 UID 时间线方案。
-
-
-## OpenAI 限流（TPM）报错时的快速处理
-
-如果出现 `rate_limit_exceeded` / `Request too large ... tokens per min`，可在环境变量里降低输入规模：
-
+- `APIFY_LOOKBACK_DAYS=2`
+- `APIFY_FETCH_LIMIT=80`
 - `PROMPT_X_MAX_ITEMS=20`
-- `PROMPT_WEIBO_MAX_ITEMS=20`
+- `APIFY_X_INPUT_JSON={"maxItems":40,"sort":"latest"}`（按你的 actor schema 调整）
 
-默认各 35 条；你可以继续降到 10 做验证。
+## 每天 10:00 自动发送
 
+### 方案 A（推荐）：GitHub Actions
 
-## 防止 Token 浪费（已加严格过滤）
+workflow 已配置：UTC `0 2 * * *`（北京时间 10:00）。
 
-已在代码中增加“仅保留目标 20 人数据”的过滤逻辑：
+### 方案 B：Vercel Cron
 
-- 已强制开启目标账号过滤（不可关闭）
-- 先按账号身份字段过滤，再进入 OpenAI 总结
-- 日志会打印过滤前后数量（`xBefore/xAfter`, `weiboBefore/weiboAfter`）
+`vercel.json` 同样为 UTC `0 2 * * *`。
 
-你可按需调整：
+## 重要说明（已删除的变量）
 
-- `APIFY_FETCH_LIMIT=120`（单次从 Apify 拉取上限）
-- `PROMPT_X_MAX_ITEMS=20`
-- `PROMPT_WEIBO_MAX_ITEMS=20`
+以下微博相关变量已不再使用，请从 Secrets / Env 中删除：
 
-如果仍担心成本，可把 `PROMPT_*` 降到 `10`。
-
-
-## 日报输出格式（已调整）
-
-目前提示词已强制：
-
-- 先输出“国内+国外AI局势”关键要点
-- 再输出 X / 微博博主动态
-- 每位博主附主页链接
-- 避免 `#` 与 `*` 这类 Markdown 符号
-
-## 每天上午 10:00 自动发送（你需要做的事）
-
-方案 A（推荐）：GitHub Actions
-
-1. 到仓库 `Settings -> Secrets and variables -> Actions -> Secrets` 配置全部变量
-2. 到 `Actions -> Daily AI Briefing` 确认 workflow 已启用
-3. 当前 cron 已是北京时间每天 10:00（UTC `0 2 * * *`）
-
-方案 B：Vercel Cron
-
-- `vercel.json` 已配置同样的 `0 2 * * *`，部署后会自动触发 `/api/daily-report`。
-
-
-## Apify 抓取控量（重点：省钱）
-
-你可以在“抓取阶段”就把范围卡死，避免无关账号导致 token 浪费。
-
-建议在 GitHub Actions Secrets / Vercel Env 设置：
-
-- `APIFY_LOOKBACK_DAYS=2`（只看最近两天）
-- `APIFY_FETCH_LIMIT=80`（每个平台最多拉 80 条）
-- `PROMPT_X_MAX_ITEMS=20`（先保守）
-- `PROMPT_WEIBO_MAX_ITEMS=20`（先保守）
-
-并且可传 actor 原生参数覆盖（高级）：
-
-- `APIFY_X_INPUT_JSON`
-
-例如（示例，按你的 actor schema 调整）：
-
-```json
-{"maxItems":40,"sort":"latest","onlyVerified":false}
-```
-
-> 注意：这两个变量必须是“合法 JSON 字符串”。
-
-### 你在 Apify 控台里应该这样设置（一步步）
-
-1. 打开 Apify -> Actors -> 你的 X 抓取 Actor
-2. 点 `Input`
-3. 核对只包含这 10 个 X 账号（不要关键词泛搜）
-4. 把时间范围字段设为“最近2天”（如 `fromDate` / `since`）
-5. 将数量上限字段设低（如 `maxItems=40~80`）
-6. 点击 `Save as default input`
-
-微博侧不再依赖 Actor 输入，改为按目标 UID 抓取最近时间线。运行后看日志中的过滤统计：
-
-- `xBefore/xAfter`
-- `weiboBefore/weiboAfter`
-
-如果 `Before` 远大于 `After`，说明 actor 仍抓了无关内容，需要继续收紧 actor input。
+- `APIFY_WEIBO_ACTOR_ID`
+- `APIFY_WEIBO_MAX_ITEMS`
+- `WEIBO_TARGET_UIDS_JSON`
+- `WEIBO_FALLBACK_PER_USER`
+- `WEIBO_EXTERNAL_SPIDER_ENABLED`
+- `WEIBO_EXTERNAL_SPIDER_CMD`
+- `WEIBO_EXTERNAL_SPIDER_OUTPUT`
+- `WEIBO_EXTERNAL_SPIDER_TIMEOUT_MS`
+- `PROMPT_WEIBO_MAX_ITEMS`

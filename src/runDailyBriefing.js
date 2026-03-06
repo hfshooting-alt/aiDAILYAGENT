@@ -1,13 +1,8 @@
 import dayjs from 'dayjs';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { readFile } from 'node:fs/promises';
 import OpenAI from 'openai';
 import nodemailer from 'nodemailer';
-import { X_TARGETS, WEIBO_TARGETS, X_TARGET_PROFILES, WEIBO_TARGET_PROFILES } from './targets.js';
+import { X_TARGETS, X_TARGET_PROFILES } from './targets.js';
 import { buildDailyPrompt } from './prompt.js';
-
-const execFileAsync = promisify(execFile);
 
 const X_ACTOR_KEYWORDS = ['twitter', 'x.com', 'x ', 'tweet'];
 
@@ -20,67 +15,12 @@ function normalizeIdentity(value) {
     .trim()
     .toLowerCase()
     .replace(/^@/, '')
-    .replace(/^https?:\/\/(www\.)?(x|twitter|weibo)\.com\/(n\/)?/g, '')
-    .replace(/^u\//, '')
+    .replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//g, '')
     .replace(/[/?#].*$/, '')
     .replace(/[._\-\s]+/g, '');
 }
 
-const X_TARGET_SET = new Set(X_TARGETS.map(normalizeIdentity));
-const WEIBO_TARGET_SET = new Set(WEIBO_TARGETS.map(normalizeIdentity));
 const X_PROFILE_BY_IDENTITY = new Map(X_TARGET_PROFILES.map((p) => [normalizeIdentity(p.handle), p]));
-const WEIBO_PROFILE_BY_IDENTITY = new Map(WEIBO_TARGET_PROFILES.map((p) => [normalizeIdentity(p.name), p]));
-
-function extractWeiboUidFromValue(value) {
-  if (value === undefined || value === null) {
-    return '';
-  }
-
-  const text = String(value).trim();
-  if (!text) {
-    return '';
-  }
-
-  if (/^\d+$/.test(text)) {
-    return text;
-  }
-
-  const match = text.match(/\/u\/(\d+)/i) || text.match(/uid=(\d+)/i);
-  return match?.[1] || '';
-}
-
-function buildWeiboUidTargetMap() {
-  const parsed = parseJsonEnv('WEIBO_TARGET_UIDS_JSON');
-  const out = new Map();
-
-  for (const profile of WEIBO_TARGET_PROFILES) {
-    const uidFromProfile = extractWeiboUidFromValue(profile.homepage);
-    if (uidFromProfile) {
-      out.set(uidFromProfile, profile);
-    }
-
-    const uidFromEnv = extractWeiboUidFromValue(parsed?.[profile.name]);
-    if (uidFromEnv) {
-      out.set(uidFromEnv, profile);
-    }
-  }
-
-  return out;
-}
-
-const WEIBO_PROFILE_BY_UID = buildWeiboUidTargetMap();
-
-function getWeiboUidForProfile(profile) {
-  return extractWeiboUidFromValue(parseJsonEnv('WEIBO_TARGET_UIDS_JSON')?.[profile.name]) || extractWeiboUidFromValue(profile.homepage);
-}
-
-function getWeiboTargetCoverage() {
-  return WEIBO_TARGET_PROFILES.map((profile) => ({
-    name: profile.name,
-    uid: getWeiboUidForProfile(profile) || null,
-    homepage: profile.homepage
-  }));
-}
 
 function parseJsonEnv(name) {
   const raw = process.env[name];
@@ -109,20 +49,16 @@ function parsePositiveInt(value, fallback) {
   return Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
-function resolveHardMaxItems(platform) {
-  const perPlatform = parseOptionalPositiveInt(process.env[`APIFY_${platform}_MAX_ITEMS`]);
+function resolveHardMaxItems() {
+  const perPlatform = parseOptionalPositiveInt(process.env.APIFY_X_MAX_ITEMS);
   if (perPlatform) {
     return perPlatform;
   }
   return parsePositiveInt(process.env.APIFY_FETCH_LIMIT, 80);
 }
 
-function buildHardLimitFields(platform, maxItems) {
-  if (platform === 'X') {
-    return { maxItems, maxTweets: maxItems, resultsLimit: maxItems, limit: maxItems };
-  }
-
-  return { maxItems, maxPosts: maxItems, resultsLimit: maxItems, limit: maxItems };
+function buildHardLimitFields(maxItems) {
+  return { maxItems, maxTweets: maxItems, resultsLimit: maxItems, limit: maxItems };
 }
 
 function buildHardTimeFields(fromDate) {
@@ -234,7 +170,7 @@ async function resolveXActorId() {
   return actor.id;
 }
 
-async function runActorAndFetchItems({ actorId, input, platform }) {
+async function runActorAndFetchItems({ actorId, input }) {
   const runUrl = buildApifyUrl(`/v2/acts/${encodeURIComponent(actorId)}/runs`);
 
   const runStart = await fetchJson(runUrl, {
@@ -253,7 +189,7 @@ async function runActorAndFetchItems({ actorId, input, platform }) {
     throw new Error(`Actor ${actorId} run finished without dataset.`);
   }
 
-  const limit = resolveHardMaxItems(platform || 'X');
+  const limit = resolveHardMaxItems();
   const datasetUrl = buildApifyUrl(`/v2/datasets/${datasetId}/items`, {
     clean: true,
     desc: true,
@@ -274,7 +210,6 @@ function pickIdentityCandidates(item) {
     'handle',
     'ownerUsername',
     'ownerScreenName',
-    'userId',
     'ownerName',
     'targetName',
     'targetHandle'
@@ -308,593 +243,13 @@ function pickIdentityCandidates(item) {
   return [...candidates].filter(Boolean);
 }
 
-function parseWeiboPostId(item) {
-  if (item?.postId) {
-    return String(item.postId);
-  }
-
-  const url = String(item?.postUrl || item?.url || item?.link || '');
-  const match = url.match(/status\/(\d+)/i);
-  return match?.[1] || '';
-}
-
-async function fetchWeiboStatusMeta(postId) {
-  if (!postId) {
-    return null;
-  }
-
-  const url = `https://m.weibo.cn/statuses/show?id=${encodeURIComponent(postId)}`;
-  const response = await fetch(url, {
-    headers: {
-      'user-agent': 'Mozilla/5.0'
-    }
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const rawBody = await response.text();
-  let data;
-  try {
-    data = JSON.parse(rawBody);
-  } catch {
-    return null;
-  }
-
-  const user = data?.data?.user || data?.user;
-  const status = data?.data || data;
-
-  if (!status) {
-    return null;
-  }
-
-  return {
-    screenName: user?.screen_name,
-    userId: user?.id ? String(user.id) : undefined,
-    profileUrl: user?.id ? `https://weibo.com/u/${user.id}` : undefined,
-    createdAt: status?.created_at,
-    text: status?.text || status?.raw_text
-  };
-}
-
-async function fetchWeiboHomepageHtml(uid) {
-  const headers = await buildWeiboRequestHeaders(uid);
-  const response = await fetch(`https://m.weibo.cn/u/${encodeURIComponent(uid)}`, { headers });
-  if (!response.ok) {
-    return '';
-  }
-  return response.text();
-}
-
-function extractStatusIdsFromHtml(html) {
-  const text = typeof html === 'string' ? html : '';
-  const ids = new Set();
-  const patterns = [/\/status\/([a-zA-Z0-9]+)/g, /"id"\s*:\s*"([a-zA-Z0-9]+)"/g];
-
-  for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.exec(text)) !== null) {
-      const id = match[1];
-      if (id && id.length >= 6) {
-        ids.add(id);
-      }
-      if (ids.size >= 40) {
-        break;
-      }
-    }
-  }
-
-  return [...ids];
-}
-
-async function fetchWeiboPostsFromHomepageFallback(uid, fromDate, perUserLimit, seenPostIds) {
-  const html = await fetchWeiboHomepageHtml(uid);
-  const statusIds = extractStatusIdsFromHtml(html);
-  const posts = [];
-
-  for (const statusId of statusIds) {
-    if (seenPostIds.has(String(statusId))) {
-      continue;
-    }
-
-    const meta = await fetchWeiboStatusMeta(statusId);
-    if (!meta || !isRecentEnough(meta.createdAt, fromDate)) {
-      continue;
-    }
-
-    const postId = String(statusId);
-    seenPostIds.add(postId);
-    posts.push({
-      postId,
-      postUrl: `https://m.weibo.cn/status/${postId}`,
-      text: meta.text,
-      createdAt: meta.createdAt,
-      userId: meta.userId || uid,
-      screenName: meta.screenName,
-      authorName: meta.screenName,
-      authorUrl: meta.profileUrl || `https://m.weibo.cn/u/${uid}`,
-      profileUrl: meta.profileUrl || `https://m.weibo.cn/u/${uid}`
-    });
-
-    if (posts.length >= perUserLimit) {
-      break;
-    }
-  }
-
-  return posts;
-}
-
-
-function isRecentEnough(createdAt, fromDate) {
-  if (!createdAt) {
-    return true;
-  }
-
-  const text = String(createdAt).trim();
-  let parsed = dayjs(text);
-
-  if (!parsed.isValid()) {
-    if (/^\d+分钟前$/.test(text) || /^\d+小时[前内]$/.test(text) || text === '刚刚') {
-      parsed = dayjs();
-    } else if (/^今天\s*\d{1,2}:\d{1,2}$/.test(text)) {
-      const [, hhmm] = text.split(/\s+/);
-      parsed = dayjs(`${dayjs().format('YYYY-MM-DD')} ${hhmm}`);
-    } else if (/^昨天\s*\d{1,2}:\d{1,2}$/.test(text)) {
-      const [, hhmm] = text.split(/\s+/);
-      parsed = dayjs(`${dayjs().subtract(1, 'day').format('YYYY-MM-DD')} ${hhmm}`);
-    } else if (/^\d{2}-\d{2}$/.test(text)) {
-      parsed = dayjs(`${dayjs().year()}-${text} 00:00`);
-    }
-  }
-
-  if (!parsed.isValid()) {
-    return true;
-  }
-
-  return parsed.isAfter(dayjs(fromDate)) || parsed.isSame(dayjs(fromDate));
-}
-
-function extractMblogsFromCards(cards) {
-  const out = [];
-  const queue = Array.isArray(cards) ? [...cards] : [];
-
-  while (queue.length > 0) {
-    const card = queue.shift();
-    if (!card || typeof card !== 'object') {
-      continue;
-    }
-
-    if (card.mblog && typeof card.mblog === 'object') {
-      out.push(card.mblog);
-    }
-
-    if (Array.isArray(card.card_group)) {
-      queue.push(...card.card_group);
-    }
-  }
-
-  return out;
-}
-
-function extractMblogsFromDataPayload(data) {
-  const out = [];
-  const cards = Array.isArray(data?.data?.cards) ? data.data.cards : [];
-  out.push(...extractMblogsFromCards(cards));
-
-  const directCandidates = [
-    data?.data?.statuses,
-    data?.statuses,
-    data?.data?.list,
-    data?.list,
-    data?.data?.items,
-    data?.items
-  ];
-
-  for (const candidate of directCandidates) {
-    if (!Array.isArray(candidate)) {
-      continue;
-    }
-    for (const item of candidate) {
-      if (item && typeof item === 'object') {
-        out.push(item?.mblog && typeof item.mblog === 'object' ? item.mblog : item);
-      }
-    }
-  }
-
-  const dedup = new Map();
-  for (const item of out) {
-    const key = String(item?.id || item?.idstr || item?.mid || Math.random());
-    if (!dedup.has(key)) {
-      dedup.set(key, item);
-    }
-  }
-
-  return [...dedup.values()];
-}
-
-async function fetchWeiboProfileInfo(uid) {
-  const requestHeaders = await buildWeiboRequestHeaders(uid);
-  const url = `https://m.weibo.cn/profile/info?uid=${encodeURIComponent(uid)}`;
-  const response = await fetch(url, {
-    headers: requestHeaders
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const rawBody = await response.text();
-  try {
-    return JSON.parse(rawBody);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeCookiePair(value) {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  return value.split(';')[0]?.trim() || '';
-}
-
-function collectSetCookies(response) {
-  if (!response?.headers) {
-    return [];
-  }
-
-  if (typeof response.headers.getSetCookie === 'function') {
-    return response.headers.getSetCookie().map(normalizeCookiePair).filter(Boolean);
-  }
-
-  const single = response.headers.get('set-cookie');
-  return single ? [normalizeCookiePair(single)] : [];
-}
-
-async function fetchWeiboSessionCookie(uid) {
-  const response = await fetch(`https://m.weibo.cn/u/${encodeURIComponent(uid)}`, {
-    headers: {
-      'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1',
-      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8'
-    }
-  });
-
-  if (!response.ok) {
-    return '';
-  }
-
-  const cookies = collectSetCookies(response);
-  return cookies.join('; ');
-}
-
-function getCookieValue(cookieHeader, key) {
-  if (!cookieHeader) {
-    return '';
-  }
-  const pair = cookieHeader
-    .split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${key}=`));
-  return pair ? decodeURIComponent(pair.slice(key.length + 1)) : '';
-}
-
-async function buildWeiboRequestHeaders(uid) {
-  const cookie = await fetchWeiboSessionCookie(uid);
-  const xsrf = getCookieValue(cookie, 'XSRF-TOKEN');
-  return {
-    'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1',
-    referer: `https://m.weibo.cn/u/${uid}`,
-    accept: 'application/json,text/plain,*/*',
-    'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    'x-requested-with': 'XMLHttpRequest',
-    ...(xsrf ? { 'x-xsrf-token': xsrf } : {}),
-    ...(cookie ? { cookie } : {})
-  };
-}
-
-async function resolveWeiboContainerIds(uid) {
-  const ids = [
-    `107603${uid}`,
-    `100505${uid}`,
-    `230413${uid}_-_WEIBO_SECOND_PROFILE_WEIBO`,
-    `100505${uid}_-_WEIBO_SECOND_PROFILE_WEIBO`
-  ];
-  const profileInfo = await fetchWeiboProfileInfo(uid);
-  const tabs = Array.isArray(profileInfo?.data?.tabsInfo?.tabs) ? profileInfo.data.tabsInfo.tabs : [];
-
-  for (const tab of tabs) {
-    const containerid = tab?.containerid;
-    const tabType = String(tab?.tab_type || '').toLowerCase();
-    const type = String(tab?.type || '').toLowerCase();
-    if (typeof containerid !== 'string' || !containerid) {
-      continue;
-    }
-    if (tabType.includes('weibo') || type.includes('weibo') || containerid.startsWith('107603')) {
-      ids.push(containerid);
-    }
-  }
-
-  return [...new Set(ids)];
-}
-
-async function fetchWeiboTimelineByUid(uid, fromDate, perUserLimit) {
-  if (!uid) {
-    return [];
-  }
-
-  const seenPostIds = new Set();
-  const results = [];
-  const containerIds = await resolveWeiboContainerIds(uid);
-  const requestHeaders = await buildWeiboRequestHeaders(uid);
-  const containerCandidates = [...containerIds, ''];
-
-  for (const containerId of containerCandidates) {
-    let sinceId = '';
-
-    for (let page = 1; page <= 5 && results.length < perUserLimit; page += 1) {
-      const params = new URLSearchParams({ type: 'uid', value: String(uid) });
-      if (containerId) {
-        params.set('containerid', containerId);
-      }
-      if (sinceId) {
-        params.set('since_id', sinceId);
-      } else {
-        params.set('page', String(page));
-      }
-
-      const url = `https://m.weibo.cn/api/container/getIndex?${params.toString()}`;
-      const response = await fetch(url, {
-        headers: requestHeaders
-      });
-
-      if (!response.ok) {
-        continue;
-      }
-
-      const rawBody = await response.text();
-      let data;
-      try {
-        data = JSON.parse(rawBody);
-      } catch {
-        continue;
-      }
-
-      if (data?.ok !== undefined && Number(data.ok) <= 0) {
-        continue;
-      }
-
-      const mblogs = extractMblogsFromDataPayload(data);
-      if (mblogs.length === 0) {
-        if (!sinceId) {
-          console.log('Weibo container returned no extractable posts', {
-            uid,
-            containerId: containerId || 'none',
-            page,
-            hasCards: Array.isArray(data?.data?.cards),
-            hasStatuses: Array.isArray(data?.data?.statuses) || Array.isArray(data?.statuses)
-          });
-          continue;
-        }
-        break;
-      }
-
-      for (const mblog of mblogs) {
-        if (!isRecentEnough(mblog?.created_at, fromDate)) {
-          continue;
-        }
-
-        const postId = String(mblog?.id || mblog?.idstr || '');
-        if (!postId || seenPostIds.has(postId)) {
-          continue;
-        }
-
-        seenPostIds.add(postId);
-        results.push({
-          postId,
-          postUrl: `https://m.weibo.cn/status/${postId}`,
-          text: mblog?.raw_text || mblog?.text,
-          createdAt: mblog?.created_at,
-          userId: mblog?.user?.id ? String(mblog.user.id) : uid,
-          screenName: mblog?.user?.screen_name,
-          authorName: mblog?.user?.screen_name,
-          authorUrl: uid ? `https://m.weibo.cn/u/${uid}` : undefined,
-          profileUrl: uid ? `https://m.weibo.cn/u/${uid}` : undefined
-        });
-
-        if (results.length >= perUserLimit) {
-          break;
-        }
-      }
-
-      const nextSinceId = data?.data?.cardlistInfo?.since_id;
-      if (!nextSinceId || String(nextSinceId) === String(sinceId || '')) {
-        break;
-      }
-      sinceId = String(nextSinceId);
-    }
-  }
-
-  if (results.length === 0) {
-    const homepageFallback = await fetchWeiboPostsFromHomepageFallback(uid, fromDate, perUserLimit, seenPostIds);
-    for (const post of homepageFallback) {
-      results.push(post);
-      if (results.length >= perUserLimit) {
-        break;
-      }
-    }
-  }
-
-  if (results.length === 0) {
-    console.log('Weibo UID empty across containers', { uid, containerIds: containerCandidates });
-  } else {
-    console.log('Weibo UID recovered via fallback', { uid, count: results.length });
-  }
-
-  return results;
-}
-
-async function fetchWeiboFallbackItems({ fromDate, maxItems }) {
-  const externalItems = await fetchWeiboItemsFromExternalSpider({ fromDate, maxItems });
-  if (externalItems.length > 0) {
-    console.log('Using external Weibo spider output', { count: externalItems.length });
-    return externalItems;
-  }
-
-  const perUserLimit = parsePositiveInt(process.env.WEIBO_FALLBACK_PER_USER, 3);
-  const all = [];
-
-  for (const profile of WEIBO_TARGET_PROFILES) {
-    const uid = getWeiboUidForProfile(profile);
-    const posts = await fetchWeiboTimelineByUid(uid, fromDate, perUserLimit);
-    console.log('Weibo UID fetch result', { target: profile.name, uid: uid || null, count: posts.length });
-    for (const post of posts) {
-      all.push(post);
-      if (all.length >= maxItems) {
-        return all;
-      }
-    }
-  }
-
-  return all;
-}
-
-function parseDateInput(value) {
-  const text = String(value || '').trim();
-  if (!text) {
-    return null;
-  }
-  const parsed = dayjs(text);
-  return parsed.isValid() ? parsed.toISOString() : text;
-}
-
-function normalizeExternalWeiboItem(raw) {
-  if (!raw || typeof raw !== 'object') {
-    return null;
-  }
-
-  const userId = String(raw.userId || raw.uid || raw.user_id || raw.authorId || '').trim();
-  const postId = String(raw.postId || raw.id || raw.mid || raw.idstr || '').trim();
-  const text = raw.text || raw.content || raw.raw_text;
-  const createdAt = parseDateInput(raw.createdAt || raw.created_at || raw.time || raw.publish_time);
-
-  if (!userId && !postId && !text) {
-    return null;
-  }
-
-  return {
-    postId,
-    postUrl: raw.postUrl || raw.url || (postId ? `https://m.weibo.cn/status/${postId}` : undefined),
-    text,
-    createdAt,
-    userId: userId || undefined,
-    screenName: raw.screenName || raw.username || raw.userName || raw.name,
-    authorName: raw.authorName || raw.screenName || raw.username || raw.userName || raw.name,
-    authorUrl: raw.authorUrl || raw.profileUrl || (userId ? `https://m.weibo.cn/u/${userId}` : undefined),
-    profileUrl: raw.profileUrl || raw.authorUrl || (userId ? `https://m.weibo.cn/u/${userId}` : undefined)
-  };
-}
-
-async function fetchWeiboItemsFromExternalSpider({ fromDate, maxItems }) {
-  if (process.env.WEIBO_EXTERNAL_SPIDER_ENABLED !== 'true') {
-    return [];
-  }
-
-  const command = process.env.WEIBO_EXTERNAL_SPIDER_CMD?.trim();
-  const outputPath = process.env.WEIBO_EXTERNAL_SPIDER_OUTPUT?.trim();
-  if (!command || !outputPath) {
-    console.warn('WEIBO_EXTERNAL_SPIDER_ENABLED=true but command/output is missing.');
-    return [];
-  }
-
-  const args = command.split(' ').filter(Boolean);
-  const [bin, ...rest] = args;
-  if (!bin) {
-    return [];
-  }
-
-  try {
-    const timeoutMs = parsePositiveInt(process.env.WEIBO_EXTERNAL_SPIDER_TIMEOUT_MS, 180000);
-    await execFileAsync(bin, rest, { timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024 });
-  } catch (error) {
-    console.warn('External Weibo spider command failed, fallback to uid timeline.', error?.message || error);
-    return [];
-  }
-
-  try {
-    const raw = await readFile(outputPath, 'utf8');
-    const parsed = JSON.parse(raw);
-    const arr = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.items) ? parsed.items : [];
-    const normalized = arr.map(normalizeExternalWeiboItem).filter(Boolean);
-    return normalized.filter((item) => isRecentEnough(item.createdAt, fromDate)).slice(0, maxItems);
-  } catch (error) {
-    console.warn('Failed to parse external Weibo spider output, fallback to uid timeline.', error?.message || error);
-    return [];
-  }
-}
-
-async function enrichWeiboItems(items) {
-  const list = Array.isArray(items) ? items : [];
-  const cache = new Map();
-
-  const enriched = await Promise.all(
-    list.map(async (item) => {
-      const postId = parseWeiboPostId(item);
-      if (!postId) {
-        return item;
-      }
-
-      if (!cache.has(postId)) {
-        cache.set(postId, fetchWeiboStatusMeta(postId).catch(() => null));
-      }
-
-      const meta = await cache.get(postId);
-      if (!meta) {
-        return item;
-      }
-
-      return {
-        ...item,
-        postId,
-        authorName: item.authorName || meta.screenName,
-        screenName: item.screenName || meta.screenName,
-        username: item.username || meta.screenName,
-        authorUrl: item.authorUrl || meta.profileUrl,
-        profileUrl: item.profileUrl || meta.profileUrl,
-        createdAt: item.createdAt || meta.createdAt,
-        text: item.text || meta.text || item.content
-      };
-    })
-  );
-
-  return enriched;
-}
-
-function attachTargetForPlatform(items, profileMap) {
+function attachTargetForX(items) {
   return (Array.isArray(items) ? items : []).map((item) => {
     const identities = pickIdentityCandidates(item);
-    const matchedIdentity = identities.find((id) => profileMap.has(id));
+    const matchedIdentity = identities.find((id) => X_PROFILE_BY_IDENTITY.has(id));
 
     if (matchedIdentity) {
-      return { ...item, _targetProfile: profileMap.get(matchedIdentity) };
-    }
-
-    return item;
-  });
-}
-
-function attachWeiboTarget(items) {
-  return (Array.isArray(items) ? items : []).map((item) => {
-    const uid = item?.userId ? String(item.userId) : '';
-    if (uid && WEIBO_PROFILE_BY_UID.has(uid)) {
-      return { ...item, _targetProfile: WEIBO_PROFILE_BY_UID.get(uid) };
-    }
-
-    const identities = pickIdentityCandidates(item);
-    const matchedIdentity = identities.find((id) => WEIBO_PROFILE_BY_IDENTITY.has(id));
-    if (matchedIdentity) {
-      return { ...item, _targetProfile: WEIBO_PROFILE_BY_IDENTITY.get(matchedIdentity) };
+      return { ...item, _targetProfile: X_PROFILE_BY_IDENTITY.get(matchedIdentity) };
     }
 
     return item;
@@ -940,8 +295,8 @@ function balanceItemsAcrossTargets(items, profiles, maxItems) {
 }
 
 function buildXInput({ fromDate }) {
-  const hardMaxItems = resolveHardMaxItems('X');
-  const hardLimits = buildHardLimitFields('X', hardMaxItems);
+  const hardMaxItems = resolveHardMaxItems();
+  const hardLimits = buildHardLimitFields(hardMaxItems);
   const hardTime = buildHardTimeFields(fromDate);
 
   return {
@@ -960,48 +315,25 @@ async function collectDailySignals() {
   const lookbackDays = parsePositiveInt(process.env.APIFY_LOOKBACK_DAYS, 2);
   const fromDate = dayjs().subtract(lookbackDays, 'day').startOf('day').toISOString();
   const xActorId = await resolveXActorId();
-  const weiboTargetCoverage = getWeiboTargetCoverage();
-
-  console.log('Configured Weibo targets', {
-    total: weiboTargetCoverage.length,
-    withUid: weiboTargetCoverage.filter((item) => Boolean(item.uid)).length,
-    withoutUid: weiboTargetCoverage.filter((item) => !item.uid).map((item) => item.name),
-    targets: weiboTargetCoverage
-  });
 
   const xItemsRaw = await runActorAndFetchItems({
     actorId: xActorId,
-    input: buildXInput({ fromDate }),
-    platform: 'X'
+    input: buildXInput({ fromDate })
   });
 
-  const weiboSource = 'uid_timeline';
-  const weiboItemsRaw = await fetchWeiboFallbackItems({ fromDate, maxItems: resolveHardMaxItems('WEIBO') });
-
-  const xWithTargets = attachTargetForPlatform(xItemsRaw, X_PROFILE_BY_IDENTITY);
+  const xWithTargets = attachTargetForX(xItemsRaw);
   const filteredXItems = filterItemsByAttachedTarget(xWithTargets);
-  const balancedXItems = balanceItemsAcrossTargets(filteredXItems, X_TARGET_PROFILES, resolveHardMaxItems('X'));
-
-  const weiboEnriched = await enrichWeiboItems(weiboItemsRaw);
-  const weiboWithTargets = attachWeiboTarget(weiboEnriched);
-  const filteredWeiboItems = filterItemsByAttachedTarget(weiboWithTargets);
-  const balancedWeiboItems = balanceItemsAcrossTargets(filteredWeiboItems, WEIBO_TARGET_PROFILES, resolveHardMaxItems('WEIBO'));
+  const balancedXItems = balanceItemsAcrossTargets(filteredXItems, X_TARGET_PROFILES, resolveHardMaxItems());
 
   console.log('Signal filtering summary', {
     strictFilter: true,
     xBefore: xItemsRaw.length,
     xAfterMatch: filteredXItems.length,
     xAfterBalanced: balancedXItems.length,
-    weiboSource,
-    weiboBefore: weiboItemsRaw.length,
-    weiboAfterEnrich: weiboEnriched.length,
-    weiboAfterMatch: filteredWeiboItems.length,
-    weiboAfterBalanced: balancedWeiboItems.length,
-    xPerTarget: Object.fromEntries(X_TARGET_PROFILES.map((p) => [p.name, balancedXItems.filter((i) => i?._targetProfile?.name === p.name).length])),
-    weiboPerTarget: Object.fromEntries(WEIBO_TARGET_PROFILES.map((p) => [p.name, balancedWeiboItems.filter((i) => i?._targetProfile?.name === p.name).length]))
+    xPerTarget: Object.fromEntries(X_TARGET_PROFILES.map((p) => [p.name, balancedXItems.filter((i) => i?._targetProfile?.name === p.name).length]))
   });
 
-  return { xItems: balancedXItems, weiboItems: balancedWeiboItems, xActorId, weiboActorId: 'uid_timeline' };
+  return { xItems: balancedXItems, xActorId };
 }
 
 function truncateString(value, maxLength = 600) {
@@ -1046,7 +378,6 @@ function compactItem(item) {
     'language',
     'likes',
     'retweets',
-    'reposts',
     'comments',
     'targetName',
     'targetHandle',
@@ -1080,19 +411,17 @@ function toPromptSignal(item) {
   });
 }
 
-function prepareItemsForPrompt(items, platformName) {
-  const maxItems = parsePositiveInt(process.env[`PROMPT_${platformName}_MAX_ITEMS`], 35);
+function prepareItemsForPrompt(items) {
+  const maxItems = parsePositiveInt(process.env.PROMPT_X_MAX_ITEMS, 35);
   return (Array.isArray(items) ? items : []).slice(0, maxItems).map(toPromptSignal);
 }
 
-async function generateBriefing({ xItems, weiboItems }) {
+async function generateBriefing({ xItems }) {
   const openai = new OpenAI({ apiKey: requiredEnv('OPENAI_API_KEY') });
   const prompt = buildDailyPrompt({
     date: dayjs().format('YYYY-MM-DD'),
-    xItems: prepareItemsForPrompt(xItems, 'X'),
-    weiboItems: prepareItemsForPrompt(weiboItems, 'WEIBO'),
-    xProfiles: X_TARGET_PROFILES,
-    weiboProfiles: WEIBO_TARGET_PROFILES
+    xItems: prepareItemsForPrompt(xItems),
+    xProfiles: X_TARGET_PROFILES
   });
 
   const response = await openai.responses.create({
@@ -1155,11 +484,10 @@ function renderDailyHtml(subject, body) {
 </html>`;
 }
 
-function buildExecutionMeta({ xCount, weiboCount }) {
+function buildExecutionMeta({ xCount }) {
   return [
     '【EXECUTION SUMMARY｜执行摘要】',
     `- X 目标信号条数：${xCount}`,
-    `- 微博目标信号条数：${weiboCount}`,
     `- 生成模型：${process.env.OPENAI_MODEL || 'unknown'}`,
     ''
   ].join('\n');
@@ -1197,18 +525,16 @@ async function sendEmail(subject, body) {
 }
 
 export async function runDailyBriefing() {
-  const { xItems, weiboItems, xActorId, weiboActorId } = await collectDailySignals();
-  const briefing = await generateBriefing({ xItems, weiboItems });
+  const { xItems, xActorId } = await collectDailySignals();
+  const briefing = await generateBriefing({ xItems });
   const subject = `AI 领袖动态日报 - ${dayjs().format('YYYY-MM-DD')}`;
-  const fullBody = removeConsecutiveDuplicateLines(`${buildExecutionMeta({ xCount: xItems.length, weiboCount: weiboItems.length })}${briefing}`);
+  const fullBody = removeConsecutiveDuplicateLines(`${buildExecutionMeta({ xCount: xItems.length })}${briefing}`);
 
   await sendEmail(subject, fullBody);
 
   return {
     subject,
     xActorId,
-    weiboActorId,
-    xCount: xItems.length,
-    weiboCount: weiboItems.length
+    xCount: xItems.length
   };
 }
