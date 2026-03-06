@@ -527,6 +527,47 @@ function linkifyLine(line) {
   });
 }
 
+function linkifyNamedSources(text) {
+  const input = String(text || '');
+  return input.replace(/([^（\(\s|:：]+)（(https?:\/\/[^）\s]+)）/g, (_m, label, url) => {
+    const href = encodeURI(url);
+    return `<a href="${href}" style="color:#1d4ed8;text-decoration:underline;font-weight:600;">${escapeHtml(label)}</a>`;
+  });
+}
+
+function formatDisplayLine(line, { inLandscapeSection = false } = {}) {
+  const normalized = String(line).trim();
+
+  // 让“证据来源”在视觉上分行更清晰
+  if (normalized.includes('证据：')) {
+    const [head, evidence] = normalized.split('证据：');
+    const evidenceLines = String(evidence)
+      .split('；')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const linkedPart = linkifyNamedSources(escapeHtml(part));
+        return `- ${linkedPart}`;
+      })
+      .join('<br/>');
+
+    const first = head.trim() ? `${linkifyNamedSources(escapeHtml(head.trim()))}<br/>` : '';
+    return `${first}<span style="font-weight:700;color:#0f172a;">证据：</span><br/>${evidenceLines}`;
+  }
+
+  // 对博主动态行：把同一行里的多条帖子强制拆行
+  if (!inLandscapeSection && /^-\s/.test(normalized) && normalized.includes('原帖链接：') && normalized.includes('；')) {
+    return normalized
+      .split('；')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => linkifyLine(escapeHtml(part)))
+      .join('<br/>');
+  }
+
+  return linkifyLine(escapeHtml(line));
+}
+
 function renderDailyHtml(subject, body) {
   const lines = String(body).split(/\r?\n/);
   let inLandscapeSection = false;
@@ -544,12 +585,12 @@ function renderDailyHtml(subject, body) {
 
       if (inLandscapeSection) {
         const normalized = trimmed.replace(/^[-•\d\.)\s]+/, '');
-        const escapedLandscape = escapeHtml(normalized);
-        return `<div style="margin:0 0 10px;padding:12px 14px;border-left:4px solid #0ea5e9;background:#eff6ff;border-radius:10px;color:#0b3b5a;line-height:1.7;font-size:15px;">• ${linkifyLine(escapedLandscape)}</div>`;
+        const formattedLandscape = formatDisplayLine(normalized, { inLandscapeSection: true });
+        return `<div style="margin:0 0 10px;padding:12px 14px;border-left:4px solid #0ea5e9;background:#eff6ff;border-radius:10px;color:#0b3b5a;line-height:1.7;font-size:15px;">• ${formattedLandscape}</div>`;
       }
 
-      const escaped = escapeHtml(line);
-      return `<p style="margin:0 0 8px;line-height:1.75;font-size:15px;color:#111827;">${linkifyLine(escaped)}</p>`;
+      const formatted = formatDisplayLine(line);
+      return `<p style="margin:0 0 8px;line-height:1.75;font-size:15px;color:#111827;">${formatted}</p>`;
     })
     .join('');
 
