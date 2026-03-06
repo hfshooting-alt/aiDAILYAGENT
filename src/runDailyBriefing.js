@@ -256,6 +256,68 @@ function attachTargetForX(items) {
   });
 }
 
+function parseItemDate(item) {
+  const candidates = [
+    item?.createdAt,
+    item?.created_at,
+    item?.date,
+    item?.timestamp,
+    item?.time,
+    item?.publishedAt,
+    item?.tweetCreatedAt,
+    item?.tweet_created_at
+  ];
+
+  for (const value of candidates) {
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+
+    if (typeof value === 'number') {
+      const ts = value > 1e12 ? value : value * 1000;
+      const parsed = dayjs(ts);
+      if (parsed.isValid()) {
+        return parsed;
+      }
+      continue;
+    }
+
+    const text = String(value).trim();
+    if (!text) {
+      continue;
+    }
+
+    if (/^\d{10,13}$/.test(text)) {
+      const n = Number(text);
+      const ts = text.length === 13 ? n : n * 1000;
+      const parsed = dayjs(ts);
+      if (parsed.isValid()) {
+        return parsed;
+      }
+      continue;
+    }
+
+    const parsed = dayjs(text);
+    if (parsed.isValid()) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function filterItemsByDateWindow(items, fromDate) {
+  const from = dayjs(fromDate);
+  const now = dayjs();
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const parsed = parseItemDate(item);
+    if (!parsed) {
+      return true;
+    }
+    return (parsed.isAfter(from) || parsed.isSame(from)) && (parsed.isBefore(now) || parsed.isSame(now));
+  });
+}
+
 function filterItemsByAttachedTarget(items) {
   return (Array.isArray(items) ? items : []).filter((item) => Boolean(item?._targetProfile));
 }
@@ -323,8 +385,9 @@ async function collectDailySignals() {
 
   const xWithTargets = attachTargetForX(xItemsRaw);
   const filteredXItems = filterItemsByAttachedTarget(xWithTargets);
+  const filteredByDateItems = filterItemsByDateWindow(filteredXItems, fromDate);
   const hardMaxItems = resolveHardMaxItems();
-  const balancedXItems = balanceItemsAcrossTargets(filteredXItems, X_TARGET_PROFILES, hardMaxItems);
+  const balancedXItems = balanceItemsAcrossTargets(filteredByDateItems, X_TARGET_PROFILES, hardMaxItems);
   const likelyCapped = xItemsRaw.length >= hardMaxItems;
 
   if (likelyCapped) {
@@ -338,6 +401,7 @@ async function collectDailySignals() {
     strictFilter: true,
     xBefore: xItemsRaw.length,
     xAfterMatch: filteredXItems.length,
+    xAfterDateWindow: filteredByDateItems.length,
     xAfterBalanced: balancedXItems.length,
     likelyCapped,
     hardMaxItems,
@@ -465,6 +529,7 @@ function linkifyLine(line) {
 
 function renderDailyHtml(subject, body) {
   const lines = String(body).split(/\r?\n/);
+  let inLandscapeSection = false;
   const content = lines
     .map((line) => {
       const trimmed = line.trim();
@@ -473,7 +538,14 @@ function renderDailyHtml(subject, body) {
       }
 
       if (/^【.+】$/.test(trimmed)) {
+        inLandscapeSection = trimmed.includes('TODAY AI LANDSCAPE') || trimmed.includes('今日AI局势');
         return `<h2 style="margin:16px 0 8px;font-size:18px;font-weight:800;letter-spacing:.3px;color:#0f172a;text-transform:uppercase;">${escapeHtml(trimmed)}</h2>`;
+      }
+
+      if (inLandscapeSection) {
+        const normalized = trimmed.replace(/^[-•\d\.)\s]+/, '');
+        const escapedLandscape = escapeHtml(normalized);
+        return `<div style="margin:0 0 10px;padding:12px 14px;border-left:4px solid #0ea5e9;background:#eff6ff;border-radius:10px;color:#0b3b5a;line-height:1.7;font-size:15px;">• ${linkifyLine(escapedLandscape)}</div>`;
       }
 
       const escaped = escapeHtml(line);
@@ -493,15 +565,6 @@ function renderDailyHtml(subject, body) {
     </div>
   </body>
 </html>`;
-}
-
-function buildExecutionMeta({ xCount }) {
-  return [
-    '【EXECUTION SUMMARY｜执行摘要】',
-    `- X 目标信号条数：${xCount}`,
-    `- 生成模型：${process.env.OPENAI_MODEL || 'unknown'}`,
-    ''
-  ].join('\n');
 }
 
 function removeConsecutiveDuplicateLines(text) {
@@ -539,7 +602,7 @@ export async function runDailyBriefing() {
   const { xItems, xActorId } = await collectDailySignals();
   const briefing = await generateBriefing({ xItems });
   const subject = `AI 领袖动态日报 - ${dayjs().format('YYYY-MM-DD')}`;
-  const fullBody = removeConsecutiveDuplicateLines(`${buildExecutionMeta({ xCount: xItems.length })}${briefing}`);
+  const fullBody = removeConsecutiveDuplicateLines(briefing);
 
   await sendEmail(subject, fullBody);
 
